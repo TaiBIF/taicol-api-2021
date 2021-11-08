@@ -1,3 +1,3 @@
 # TaiCoL API 2021
 
-[Documetation](https://app.apiary.io/taicolname/)
+[Documentation](https://app.apiary.io/taicolname/)
