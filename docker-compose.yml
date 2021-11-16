@@ -1,0 +1,30 @@
+version: '3.7'
+
+services:
+  django:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tc-api-container
+    image: tc-api-image
+    expose:
+      - 8001
+    depends_on:
+      - postgres
+    volumes:
+      - .:/code
+    command: /srv/start
+    restart: always
+    #env_file:
+    #  - .env
+    environment:
+      - WEB_ENV=prod
+  nginx:
+    image: nginx:1.19.10-alpine
+    restart: always
+    ports:
+      - 80:80
+    volumes:
+      - ./scripts/nginx-django.conf:/etc/nginx/conf.d/ct21.conf
+    links:
+      - django:django
