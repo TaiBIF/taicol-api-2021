@@ -47,9 +47,9 @@ RUN poetry install --no-root --no-dev
 # RUN sed -i 's/\r$//g' /srv/entrypoint
 # RUN chmod +x /srv/entrypoint
 
-COPY ./scripts/start /srv/start
-RUN sed -i 's/\r$//g' /srv/start
-RUN chmod +x /srv/start
+# COPY ./scripts/start /srv/start
+# RUN sed -i 's/\r$//g' /srv/start
+# RUN chmod +x /srv/start
 
 
 # ENTRYPOINT ["/srv/entrypoint"]
