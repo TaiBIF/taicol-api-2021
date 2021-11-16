@@ -3,3 +3,4 @@ __pycache__/
 
 db.sqlite3
 .env
+api/__pycache__/views.cpython-38.pyc
