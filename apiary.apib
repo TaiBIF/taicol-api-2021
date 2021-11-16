@@ -1,0 +1,71 @@
+FORMAT: 1A
+HOST: https://polls.apiblueprint.org/
+
+# TaiCoL-Name
+
+Polls is a simple API allowing consumers to view polls and vote in them.
+
+## API [/api]
+
+### 取得物種名 [GET /v1/name/{?name_id,scientific_name,taxon_group,created_at,updated_at,limit,page}]
+
++ Parameters
+    + name_id: `38277` (number, optional) - 完全符合學名id。若有此參數，則不考慮其他條件
+    + scientific_name: `Lasianthus fordii` (string, optional) - 完全符合學名，若有此參數，則不考慮分類群
+    + taxon_group: `Bangiophyceae` (string, optional) - 取得完全符合分類群及以下階層的所有學名資料
+    + created_at: `2021-03-31` (date, optional) - 取得指定年月日以後建立之學名資料
+    + updated_at: `2021-03-31` (date, optional) - 取得指定年月日以後更新之學名資料
+    + limit: `20` (number, optional) - 限制每頁回傳筆數，預設為20，至多為300
+    + page: `1` (number, optional) - 取得指定頁數的資料
+
+
++ Response 200 (application/json)
+
+        {'status': {'code': 200, 'message': 'Success'},
+         'info': {'total': 5, 'limit': 2, 'current_page': 1, 'total_page': 3},
+         'data': [{'name_id': 10,
+           'nomenclature_name': 'ICN',
+           'rank': 'Class',
+           'simple_name': 'Bangiophyceae',
+           'name_author': 'Wettst.',
+           'name': {},
+           'original_name_id': None,
+           'is_hybrid': 'false',
+           'hybrid_parent': '',
+           'protologue': '"Handbuch der systematischen Botanik 1: 187. 1901"',
+           'type_name': '',
+           'created_at': Timestamp('2021-05-20 18:29:32'),
+           'updated_at': Timestamp('2021-05-20 18:29:32')},
+          {'name_id': 757,
+           'nomenclature_name': 'ICN',
+           'rank': 'Genus',
+           'simple_name': 'Bangia',
+           'name_author': 'Lyngb.',
+           'name': {},
+           'original_name_id': None,
+           'is_hybrid': 'false',
+           'hybrid_parent': '',
+           'protologue': 'null',
+           'type_name': '',
+           'created_at': Timestamp('2021-05-20 18:29:39'),
+           'updated_at': Timestamp('2021-05-20 18:29:39')}]}
+          
+
++ Response 400 (application/json)
+
+        {"status": {"code": 400,"message": "Bad Request: Page does not exist"}}
+        
+        
++ Response 400 (application/json)
+
+        {"status": {"code": 400,"message": "Bad Request: Unsupported parameters"}}
+        
+        
++ Response 400 (application/json)
+
+        {"status": {"code": 400,"message": "Bad Request: Type error of limit or page"}}
+        
+        
++ Response 500 (application/json)
+
+        {"status": {"code": 500,"message": "Unexpected Error"}}
