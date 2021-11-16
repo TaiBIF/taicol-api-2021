@@ -1,3 +1,4 @@
+from os import error
 from django.shortcuts import render
 from django.http import (
     JsonResponse,
@@ -10,6 +11,8 @@ import json
 import pymysql
 from conf.settings import env
 import pandas as pd
+import datetime
+from json import JSONEncoder
 
 
 db_settings = {
@@ -19,6 +22,13 @@ db_settings = {
     "password": env('DB_PASSWORD'),
     "db": env('DB_DBNAME'),
 }
+
+
+class DateTimeEncoder(JSONEncoder):
+    # Override the default method
+    def default(self, obj):
+        if isinstance(obj, (datetime.date, datetime.datetime)):
+            return obj.isoformat()
 
 
 def name(request):
@@ -97,6 +107,7 @@ def name(request):
                 cursor.execute(query_1)
                 results = cursor.fetchall()
             # find all child id
+            print('s')
             all_child_results = ()
             for r in results:  # could be more than 1
                 current_id = r[0]
@@ -118,7 +129,10 @@ def name(request):
                 query = f"{common_query} WHERE tn.id IN {str(tuple((item[0] for item in all_results)))}"
                 for c in conditions:
                     query += " AND " + c
-            print('taxon_group: ', query)
+            else:
+                # 沒有結果的狀態
+                query = f"{common_query} LIMIT 0"
+            # print('taxon_group: ', query)
         else:
             # updated_at, created_at or no condition
             if len(conditions) == 1:
@@ -185,10 +199,10 @@ def name(request):
                 '\"', '', regex=True)
 
             # date to string
-            current_df['created_at'] = current_df['created_at'].dt.strftime(
-                '%Y-%m-%d %H:%M:%S')
-            current_df['updated_at'] = current_df['updated_at'].dt.strftime(
-                '%Y-%m-%d %H:%M:%S')
+            # current_df['created_at'] = current_df['created_at'].dt.strftime(
+            #     '%Y-%m-%d %H:%M:%S')
+            # current_df['updated_at'] = current_df['updated_at'].dt.strftime(
+            #     '%Y-%m-%d %H:%M:%S')
 
             # remove null/empty/None element in 'name' json
             for n in current_df.index:
@@ -200,12 +214,19 @@ def name(request):
             current_df = current_df[['name_id', 'nomenclature_name', 'rank', 'simple_name', 'name_author', 'name', 'original_name_id',
                                     'is_hybrid', 'hybrid_parent', 'protologue', 'type_name', 'created_at', 'updated_at']]
 
-            # current_df.to_dict('records')
+            current_df['is_hybrid'] = current_df['is_hybrid'].replace(
+                'false', False).replace('true', True)
+
+            current_df.loc[current_df['protologue']
+                           == "null", 'protologue'] = None
+            current_df.loc[current_df['name_author']
+                           == "", 'name_author'] = None
+
             response = {"status": {"code": 200, "message": "Success"},
                         "info": {"total": len_total, "limit": limit, "current_page": page, "total_page": total_page}, "data": current_df.to_dict('records')}
     except:
         response = {"status": {"code": 500,
                                "message": "Unexpected Error"}}
 
-    return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
+    return HttpResponse(json.dumps(response, ensure_ascii=False, cls=DateTimeEncoder), content_type="application/json,charset=utf-8")
     # https://www.django-rest-framework.org/api-guide/exceptions/
