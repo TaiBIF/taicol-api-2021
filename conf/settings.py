@@ -30,7 +30,7 @@ SECRET_KEY = 'gt3n3#ta%@6z*7mfkyp!21&u#(d&bv35!*4if6mjplws)bdt8*'
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=[])
 
 
 # Application definition
