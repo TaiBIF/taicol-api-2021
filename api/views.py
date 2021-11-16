@@ -23,24 +23,29 @@ db_settings = {
 
 def name(request):
     # print(type(request.GET.get('limit', 20)), request.GET.get('page', 1))
-    print(isinstance(type(request.GET.get('limit', 20)), int))
+
     try:
-        if request.GET.keys() and request.GET.keys() not in ['name_id', 'scientific_name', 'common_name', 'updated_at', 'created_at', 'taxon_group', 'limit', 'page']:
+        limit = int(request.GET.get('limit', 20))
+        page = int(request.GET.get('page', 1))
+    except:
+        response = {"status": {"code": 400,
+                               "message": "Bad Request: Type error of limit or page"}}
+        return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
+
+    try:
+        if request.GET.keys() and not set(list(request.GET.keys())) <= set(['name_id', 'scientific_name', 'common_name', 'updated_at', 'created_at', 'taxon_group', 'limit', 'page']):
             response = {"status": {"code": 400,
                                    "message": "Bad Request: Unsupported parameters"}}
             return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
-        elif not isinstance(request.GET.get('limit', 20), int) or not isinstance(request.GET.get('page', 1), int):
-            response = {"status": {"code": 400,
-                                   "message": "Bad Request: Type error of limit or page"}}
-            return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
+        # elif not isinstance(request.GET.get('limit', 20), int) or not isinstance(request.GET.get('page', 1), int):
 
         name_id = request.GET.get('name_id', '')
         scientific_name = request.GET.get('scientific_name', '')
         updated_at = request.GET.get('updated_at', '')
         created_at = request.GET.get('created_at', '')
         taxon_group = request.GET.get('taxon_group', '')
-        limit = request.GET.get('limit', 20)
-        page = request.GET.get('page', 1)
+        # limit = request.GET.get('limit', 20)
+        # page = request.GET.get('page', 1)
         limit = 300 if limit > 300 else limit  # 最大值 300
 
         print(name_id, scientific_name, updated_at, created_at, taxon_group)
