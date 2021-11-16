@@ -9,8 +9,6 @@ services:
     image: tc-api-image
     expose:
       - 8001
-    depends_on:
-      - postgres
     volumes:
       - .:/code
     command: /srv/start
