@@ -22,15 +22,18 @@ db_settings = {
 
 
 def name(request):
+    # print(type(request.GET.get('limit', 20)), request.GET.get('page', 1))
+    print(isinstance(type(request.GET.get('limit', 20)), int))
     try:
         if request.GET.keys() and request.GET.keys() not in ['name_id', 'scientific_name', 'common_name', 'updated_at', 'created_at', 'taxon_group', 'limit', 'page']:
             response = {"status": {"code": 400,
                                    "message": "Bad Request: Unsupported parameters"}}
             return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
-        elif type(request.GET.get('limit', 20)) != 'int' or type(request.GET.get('page', 1)) != 'int':
+        elif not isinstance(request.GET.get('limit', 20), int) or not isinstance(request.GET.get('page', 1), int):
             response = {"status": {"code": 400,
                                    "message": "Bad Request: Type error of limit or page"}}
             return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
+
         name_id = request.GET.get('name_id', '')
         scientific_name = request.GET.get('scientific_name', '')
         updated_at = request.GET.get('updated_at', '')
@@ -128,72 +131,76 @@ def name(request):
             name_results = pd.DataFrame(name_results, columns=['name_id', 'nomenclature_id', 'rank_id', 'simple_name',
                                                                'name_author', 'tn_properties', 'original_name_id', 'note',
                                                                'created_at', 'updated_at', 'nomenclature_name', 'rank', 'is_hybrid', 'protologue', 'type_name_id', 'name'])
-            name_results['type_name'] = ''
 
+            len_total = len(name_results)
+            # pagination
+            paginator = Paginator(name_results, limit)
+            total_page = paginator.num_pages
+            if page > total_page:
+                response = {"status": {"code": 400,
+                                       "message": "Bad Request: Page does not exist"}}
+                return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
+
+            # 只處理限制筆數
+            current_df = paginator.page(page).object_list
             # find type_name
-            for t in name_results.type_name_id:
+            current_df['type_name'] = None
+            for t in current_df.type_name_id:
                 if t:
                     query_type_name = f"SELECT name FROM taxon_names WHERE id = {t}"
                     with conn.cursor() as cursor:
                         cursor.execute(query_type_name)
                         type_name_result = cursor.fetchone()
                     if type_name_result:
-                        name_results.loc[name_results.type_name_id ==
-                                         t, 'type_name'] = type_name_result[0]
+                        current_df.loc[current_df.type_name_id ==
+                                       t, 'type_name'] = type_name_result[0]
 
             # find hybrid_parent
-            name_results['hybrid_parent'] = ''
-            for h in name_results[['is_hybrid', 'name_id']].index:
-                if name_results.loc[h]['is_hybrid']:
-                    # query_hybrid_parent = f"SELECT tn.name FROM taxon_name_hybrid_parent AS tnhp \
-                    #                         WHERE taxon_name_id = {name_results.loc[h]['name_id']} \
-                    #                         LEFT JOIN taxon_names AS tn ON tn.id = tnhp.parent_taxon_name_id"
+            current_df['hybrid_parent'] = None
+            for h in current_df[['is_hybrid', 'name_id']].index:
+                if current_df.loc[h]['is_hybrid'] == 'true':
                     query_hybrid_parent = f"SELECT tn.name FROM taxon_name_hybrid_parent AS tnhp \
-                        LEFT JOIN taxon_names AS tn ON tn.id = tnhp.parent_taxon_name_id \
-                        WHERE tnhp.taxon_name_id = 10 "
+                                            LEFT JOIN taxon_names AS tn ON tn.id = tnhp.parent_taxon_name_id \
+                                            WHERE tnhp.taxon_name_id = {current_df.loc[h]['name_id']} "
                     with conn.cursor() as cursor:
                         cursor.execute(query_hybrid_parent)
                         hybrid_name_result = cursor.fetchall()
                     hybrid_names = ', '.join(item[0]
                                              for item in hybrid_name_result)
-                    name_results.loc[name_results.name_id == name_results.loc[h]
-                                     ['name_id'], 'hybrid_parent'] = hybrid_names
+                    current_df.loc[current_df.name_id == current_df.loc[h]
+                                   ['name_id'], 'hybrid_parent'] = hybrid_names
 
-        # organize results
-        # only rank >= 34 has 物種學名分欄 & original_name_id
-        name_results.loc[name_results.rank_id < 34, 'name'] = ''
-        name_results.loc[name_results.rank_id < 34, 'original_name_id'] = ''
+            # organize results
+            # only rank >= 34 has 物種學名分欄 & original_name_id
+            current_df.loc[current_df.rank_id < 34, 'name'] = '{}'
+            current_df.loc[current_df.rank_id < 34, 'original_name_id'] = None
 
-        len_total = len(name_results)
-        # pagination
-        paginator = Paginator(name_results, limit)
-        total_page = paginator.num_pages
-        if page > total_page:
-            response = {"status": {"code": 400,
-                                   "message": "Bad Request: Page does not exist"}}
-            return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
+            # remove double quote in rank field
+            current_df['rank'] = current_df['rank'].replace(
+                '\"', '', regex=True)
 
-        # subset & rename columns
-        current_df = paginator.page(page).object_list
-        current_df = current_df[['name_id', 'nomenclature_name', 'rank', 'simple_name', 'name_author', 'name', 'original_name_id',
-                                'is_hybrid', 'hybrid_parent', 'protologue', 'type_name', 'created_at', 'updated_at']]
+            # date to string
+            current_df['created_at'] = current_df['created_at'].dt.strftime(
+                '%Y-%m-%d %H:%M:%S')
+            current_df['updated_at'] = current_df['updated_at'].dt.strftime(
+                '%Y-%m-%d %H:%M:%S')
 
-        # remove double quote in rank field
-        current_df['rank'] = current_df['rank'].replace('\"', '', regex=True)
+            # remove null/empty/None element in 'name' json
+            for n in current_df.index:
+                tmp = json.loads(str(current_df.name[n]))
+                tmp = {k: v for k, v in tmp.items() if v}
+                current_df.loc[n, 'name'] = [tmp]
 
-        # remove null/empty/None element in 'name' json
-        for n in name_results.index:
-            tmp = json.loads(name_results.name[n])
-            tmp = {k: v for k, v in tmp.items() if v}
-            name_results.loc[n, 'name'] = [tmp]
+            # subset & rename columns
+            current_df = current_df[['name_id', 'nomenclature_name', 'rank', 'simple_name', 'name_author', 'name', 'original_name_id',
+                                    'is_hybrid', 'hybrid_parent', 'protologue', 'type_name', 'created_at', 'updated_at']]
 
-        # current_df.to_dict('records')
-        response = {"status": {"code": 200, "message": "Success"},
-                    "info": {"total": len_total, "current_page": page, "total_page": total_page}, "data": current_df.to_dict('records')}
-
+            # current_df.to_dict('records')
+            response = {"status": {"code": 200, "message": "Success"},
+                        "info": {"total": len_total, "limit": limit, "current_page": page, "total_page": total_page}, "data": current_df.to_dict('records')}
     except:
         response = {"status": {"code": 500,
-                               "message": "Internal Server Error"}}
+                               "message": "Unexpected Error"}}
 
     return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
     # https://www.django-rest-framework.org/api-guide/exceptions/
