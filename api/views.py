@@ -25,6 +25,14 @@ db_settings = {
 }
 
 
+def validate(date_text):
+    try:
+        datetime.datetime.strptime(date_text, '%Y-%m-%d')
+        return True
+    except ValueError:
+        return False
+
+
 class DateTimeEncoder(JSONEncoder):
     # Override the default method
     def default(self, obj):
@@ -39,23 +47,21 @@ def name(request):
         limit = int(request.GET.get('limit', 20))
         page = int(request.GET.get('page', 1))
     except:
-        response = {"status": {"code": 400,
-                               "message": "Bad Request: Type error of limit or page"}}
+        response = {"status": {"code": 400, "message": "Bad Request: Type error of limit or page"}}
         return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
 
     try:
         if request.GET.keys() and not set(list(request.GET.keys())) <= set(['name_id', 'scientific_name', 'common_name', 'updated_at', 'created_at', 'taxon_group', 'limit', 'page']):
-            response = {"status": {"code": 400,
-                                   "message": "Bad Request: Unsupported parameters"}}
+            response = {"status": {"code": 400, "message": "Bad Request: Unsupported parameters"}}
             return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
         # elif not isinstance(request.GET.get('limit', 20), int) or not isinstance(request.GET.get('page', 1), int):
 
         # only consider first parameter
-        name_id = request.GET.getlist('name_id', [''])[0]
-        scientific_name = request.GET.getlist('scientific_name', [''])[0]
-        updated_at = request.GET.getlist('updated_at', [''])[0]
-        created_at = request.GET.getlist('created_at', [''])[0]
-        taxon_group = request.GET.getlist('taxon_group', [''])[0]
+        name_id = request.GET.getlist('name_id', [''])[0].lstrip().rstrip()
+        scientific_name = request.GET.getlist('scientific_name', [''])[0].lstrip().rstrip()
+        updated_at = request.GET.getlist('updated_at', [''])[0].lstrip().rstrip()
+        created_at = request.GET.getlist('created_at', [''])[0].lstrip().rstrip()
+        taxon_group = request.GET.getlist('taxon_group', [''])[0].lstrip().rstrip()
         # limit = request.GET.get('limit', 20)
         # page = request.GET.get('page', 1)
         limit = 300 if limit > 300 else limit  # 最大值 300
@@ -85,15 +91,20 @@ def name(request):
         # name_id, nomenclature_id, rank_id, simple_name, name_author, tn_properties, original_name_id, note
         # created_at, updated_at, nomenclature_name, rank, is_hybrid, protologue, type_name_id, latin_genus,
         # latin_s1, s2_rank, latin_s2, s3_rank, latin_s3, s4_rank, latin_s4
-
         conditions = []
         if updated_at:
+            if not validate(updated_at):
+                response = {"status": {"code": 400, "message": "Bad Request: Incorrect DATE(updated_at) value"}}
+                return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
             conditions += [f"date(tn.updated_at) > '{updated_at}'"]
         if created_at:
+            if not validate(created_at):
+                response = {"status": {"code": 400, "message": "Bad Request: Incorrect DATE(created_at) value"}}
+                return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
             conditions += [f"date(tn.created_at) > '{created_at}'"]
 
         if name_id:  # 不考慮其他條件
-            query = f"{common_query} WHERE tn.id = {name_id}"
+            query = f"{common_query} WHERE tn.id = '{name_id}'"
             # print('name_id: ', query)
         elif scientific_name:  # 不考慮分類群, scientific_name, updated_at, created_at
             query = f"{common_query} WHERE tn.name = '{scientific_name}'"
@@ -143,7 +154,6 @@ def name(request):
             else:  # len == 0
                 query = common_query
             # print('else: ', query)
-
         with conn.cursor() as cursor:
             cursor.execute(query)
             name_results = cursor.fetchall()
@@ -157,8 +167,7 @@ def name(request):
             paginator = Paginator(name_results, limit)
             total_page = paginator.num_pages
             if page > total_page:
-                response = {"status": {"code": 400,
-                                       "message": "Bad Request: Page does not exist"}}
+                response = {"status": {"code": 400, "message": "Bad Request: Page does not exist"}}
                 return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
 
             # 只處理限制筆數
@@ -172,8 +181,7 @@ def name(request):
                         cursor.execute(query_type_name)
                         type_name_result = cursor.fetchone()
                     if type_name_result:
-                        current_df.loc[current_df.type_name_id ==
-                                       t, 'type_name'] = type_name_result[0]
+                        current_df.loc[current_df.type_name_id == t, 'type_name'] = type_name_result[0]
 
             # find hybrid_parent
             current_df['hybrid_parent'] = None
@@ -187,8 +195,7 @@ def name(request):
                         hybrid_name_result = cursor.fetchall()
                     hybrid_names = ', '.join(item[0]
                                              for item in hybrid_name_result)
-                    current_df.loc[current_df.name_id == current_df.loc[h]
-                                   ['name_id'], 'hybrid_parent'] = hybrid_names
+                    current_df.loc[current_df.name_id == current_df.loc[h]['name_id'], 'hybrid_parent'] = hybrid_names
 
             # organize results
             # only rank >= 34 has 物種學名分欄 & original_name_id
@@ -198,10 +205,8 @@ def name(request):
             current_df = current_df.replace({np.nan: None})
 
             # remove double quote in rank & protologue field
-            current_df['rank'] = current_df['rank'].replace(
-                '\"', '', regex=True)
-            current_df['protologue'] = current_df['protologue'].replace(
-                '\"', '', regex=True)
+            current_df['rank'] = current_df['rank'].replace('\"', '', regex=True)
+            current_df['protologue'] = current_df['protologue'].replace('\"', '', regex=True)
             # date to string
             # current_df['created_at'] = current_df['created_at'].dt.strftime(
             #     '%Y-%m-%d %H:%M:%S')
@@ -218,19 +223,15 @@ def name(request):
             current_df = current_df[['name_id', 'nomenclature_name', 'rank', 'simple_name', 'name_author', 'name', 'original_name_id',
                                     'is_hybrid', 'hybrid_parent', 'protologue', 'type_name', 'created_at', 'updated_at']]
 
-            current_df['is_hybrid'] = current_df['is_hybrid'].replace(
-                'false', False).replace('true', True)
+            current_df['is_hybrid'] = current_df['is_hybrid'].replace('false', False).replace('true', True)
 
-            current_df.loc[current_df['protologue']
-                           == "null", 'protologue'] = None
-            current_df.loc[current_df['name_author']
-                           == "", 'name_author'] = None
+            current_df.loc[current_df['protologue'] == "null", 'protologue'] = None
+            current_df.loc[current_df['name_author'] == "", 'name_author'] = None
 
             response = {"status": {"code": 200, "message": "Success"},
                         "info": {"total": len_total, "limit": limit, "current_page": page, "total_page": total_page}, "data": current_df.to_dict('records')}
     except:
-        response = {"status": {"code": 500,
-                               "message": "Unexpected Error"}}
+        response = {"status": {"code": 500,"message": "Unexpected Error"}}
 
     return HttpResponse(json.dumps(response, ensure_ascii=False, cls=DateTimeEncoder), content_type="application/json,charset=utf-8")
     # https://www.django-rest-framework.org/api-guide/exceptions/
