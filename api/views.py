@@ -13,6 +13,7 @@ from conf.settings import env
 import pandas as pd
 import datetime
 from json import JSONEncoder
+import numpy as np
 
 
 db_settings = {
@@ -49,16 +50,17 @@ def name(request):
             return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
         # elif not isinstance(request.GET.get('limit', 20), int) or not isinstance(request.GET.get('page', 1), int):
 
-        name_id = request.GET.get('name_id', '')
-        scientific_name = request.GET.get('scientific_name', '')
-        updated_at = request.GET.get('updated_at', '')
-        created_at = request.GET.get('created_at', '')
-        taxon_group = request.GET.get('taxon_group', '')
+        # only consider first parameter
+        name_id = request.GET.getlist('name_id', [''])[0]
+        scientific_name = request.GET.getlist('scientific_name', [''])[0]
+        updated_at = request.GET.getlist('updated_at', [''])[0]
+        created_at = request.GET.getlist('created_at', [''])[0]
+        taxon_group = request.GET.getlist('taxon_group', [''])[0]
         # limit = request.GET.get('limit', 20)
         # page = request.GET.get('page', 1)
         limit = 300 if limit > 300 else limit  # 最大值 300
 
-        print(name_id, scientific_name, updated_at, created_at, taxon_group)
+        # print(name_id, scientific_name, updated_at, created_at, taxon_group)
         conn = pymysql.connect(**db_settings)
         common_query = "SELECT tn.id, tn.nomenclature_id, tn.rank_id, tn.name, tn.formatted_authors, \
                         tn.properties, tn.original_taxon_name_id, tn.note, tn.created_at, tn.updated_at, \
@@ -92,12 +94,12 @@ def name(request):
 
         if name_id:  # 不考慮其他條件
             query = f"{common_query} WHERE tn.id = {name_id}"
-            print('name_id: ', query)
+            # print('name_id: ', query)
         elif scientific_name:  # 不考慮分類群, scientific_name, updated_at, created_at
             query = f"{common_query} WHERE tn.name = '{scientific_name}'"
             for c in conditions:
                 query += " AND " + c
-            print('name: ', query)
+            # print('name: ', query)
         elif taxon_group:
             # 先由 學名 / 中文名 找出符合的name_id
             query_1 = f"SELECT id FROM taxon_names WHERE name = '{taxon_group}'"
@@ -107,7 +109,6 @@ def name(request):
                 cursor.execute(query_1)
                 results = cursor.fetchall()
             # find all child id
-            print('s')
             all_child_results = ()
             for r in results:  # could be more than 1
                 current_id = r[0]
@@ -141,7 +142,7 @@ def name(request):
                 query = f"{common_query} WHERE {conditions[0]} AND {conditions[1]}"
             else:  # len == 0
                 query = common_query
-            print('else: ', query)
+            # print('else: ', query)
 
         with conn.cursor() as cursor:
             cursor.execute(query)
@@ -194,10 +195,13 @@ def name(request):
             current_df.loc[current_df.rank_id < 34, 'name'] = '{}'
             current_df.loc[current_df.rank_id < 34, 'original_name_id'] = None
 
-            # remove double quote in rank field
+            current_df = current_df.replace({np.nan: None})
+
+            # remove double quote in rank & protologue field
             current_df['rank'] = current_df['rank'].replace(
                 '\"', '', regex=True)
-
+            current_df['protologue'] = current_df['protologue'].replace(
+                '\"', '', regex=True)
             # date to string
             # current_df['created_at'] = current_df['created_at'].dt.strftime(
             #     '%Y-%m-%d %H:%M:%S')
