@@ -8,7 +8,7 @@ services:
     command: ./scripts/docker-entry.sh
     volumes:
       - .:/code
-      - ./taicol-volumes/static:/code/static
+      - ../taicol-volumes/static:/code/conf/static
     expose:
       - 8001
     tty: true
@@ -25,7 +25,7 @@ services:
     volumes:
       - ./scripts/nginx-django.conf:/etc/nginx/conf.d/nginx-django.conf
       # - ./taicol-volumes/logs/nginx:/var/log/nginx
-      - ./taicol-volumes/static:/code/static
+      - ../taicol-volumes/static:/code/conf/static
       # - ./taicol-volumes/certbot/conf:/etc/letsencrypt
       # - ./taicol-volumes/certbot/www:/var/www/certbot
     links:
