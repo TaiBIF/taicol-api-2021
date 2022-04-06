@@ -45,70 +45,183 @@ class DateTimeEncoder(JSONEncoder):
             return obj.isoformat()
 
 
+class TaxonView(APIView):
+    @swagger_auto_schema(
+        operation_summary='取得物種',
+        # operation_description='我是 GET 的說明',
+        manual_parameters=[
+            # 暫時先不做
+            # openapi.Parameter(
+            #     name='concept_id',
+            #     in_=openapi.IN_QUERY,
+            #     description='分類觀',
+            #     type=openapi.TYPE_INTEGER
+            # ),
+            openapi.Parameter(
+                name='taxon_id',
+                in_=openapi.IN_QUERY,
+                description='物種ID',
+                type=openapi.TYPE_STRING
+            ),
+            openapi.Parameter(
+                name='taxon_group',
+                in_=openapi.IN_QUERY,
+                description='分類群',
+                type=openapi.TYPE_STRING
+            ),
+            openapi.Parameter(
+                name='created_at',
+                in_=openapi.IN_QUERY,
+                description='建立日期',
+                type=openapi.FORMAT_DATE
+            ),
+            openapi.Parameter(
+                name='updated_at',
+                in_=openapi.IN_QUERY,
+                description='更新日期',
+                type=openapi.FORMAT_DATE
+            ),
+            openapi.Parameter(
+                name='limit',
+                in_=openapi.IN_QUERY,
+                description='每頁限制筆數',
+                type=openapi.TYPE_INTEGER
+            ),
+            openapi.Parameter(
+                name='offset',
+                in_=openapi.IN_QUERY,
+                description='指定每頁起始編號',
+                type=openapi.TYPE_INTEGER
+            ),
+            openapi.Parameter(
+                name='is_hybrid',
+                in_=openapi.IN_QUERY,
+                description='是否為雜交',
+                type=openapi.TYPE_BOOLEAN
+            ),
+            openapi.Parameter(
+                name='is_endemic',
+                in_=openapi.IN_QUERY,
+                description='是否為臺灣特有種',
+                type=openapi.TYPE_BOOLEAN
+            ),
+            openapi.Parameter(
+                name='alien_type',
+                in_=openapi.IN_QUERY,
+                description='外來屬性',
+                type=openapi.TYPE_STRING
+            ),
+            openapi.Parameter(
+                name='is_fossil',
+                in_=openapi.IN_QUERY,
+                description='是否為化石種',
+                type=openapi.TYPE_BOOLEAN
+            ),
+            openapi.Parameter(
+                name='is_terrestrial',
+                in_=openapi.IN_QUERY,
+                description='棲地是否為陸域',
+                type=openapi.TYPE_BOOLEAN
+            ),
+            openapi.Parameter(
+                name='is_freshwater',
+                in_=openapi.IN_QUERY,
+                description='棲地是否為淡水',
+                type=openapi.TYPE_BOOLEAN
+            ),
+            openapi.Parameter(
+                name='is_brackish',
+                in_=openapi.IN_QUERY,
+                description='棲地是否為半鹹水',
+                type=openapi.TYPE_BOOLEAN
+            ),
+            openapi.Parameter(
+                name='is_marine',
+                in_=openapi.IN_QUERY,
+                description='棲地是否為海洋',
+                type=openapi.TYPE_BOOLEAN
+            ),
+        ]
+    )
+    def get(self, request, *args, **krgs):
+
+        try:
+            limit = int(request.GET.get('limit', 20))
+            offset = int(request.GET.get('offset', 1))
+        except:
+            response = {"status": {"code": 400, "message": "Bad Request: Type error of limit or page"}}
+            return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
+
+        response = {}
+        return HttpResponse(json.dumps(response, ensure_ascii=False, cls=DateTimeEncoder), content_type="application/json,charset=utf-8")
+
+
 class NameView(APIView):
 
     # openapi.TYPE_STRING、openapi.TYPE_NUMBER、openapi.TYPE_INTEGER、openapi.TYPE_BOOLEAN、openapi.TYPE_ARRAY、openapi.TYPE_FILE
 
     @swagger_auto_schema(
-            operation_summary='取得學名',
-            # operation_description='我是 GET 的說明',
-            manual_parameters=[
-                openapi.Parameter(
-                    name='name_id',
-                    in_=openapi.IN_QUERY,
-                    description='學名ID',
-                    type=openapi.TYPE_INTEGER
-                ),
-                openapi.Parameter(
-                    name='scientific_name',
-                    in_=openapi.IN_QUERY,
-                    description='學名',
-                    type=openapi.TYPE_STRING
-                ),
-                openapi.Parameter(
-                    name='taxon_group',
-                    in_=openapi.IN_QUERY,
-                    description='分類群',
-                    type=openapi.TYPE_STRING
-                ),
-                openapi.Parameter(
-                    name='created_at',
-                    in_=openapi.IN_QUERY,
-                    description='建立日期',
-                    type=openapi.FORMAT_DATE
-                ),
-                openapi.Parameter(
-                    name='updated_at',
-                    in_=openapi.IN_QUERY,
-                    description='更新日期',
-                    type=openapi.FORMAT_DATE
-                ),
-                openapi.Parameter(
-                    name='limit',
-                    in_=openapi.IN_QUERY,
-                    description='每頁限制筆數',
-                    type=openapi.TYPE_INTEGER
-                ),
-                openapi.Parameter(
-                    name='page',
-                    in_=openapi.IN_QUERY,
-                    description='指定所在頁數',
-                    type=openapi.TYPE_INTEGER
-                ),
-            ]
-        )
+        operation_summary='取得學名',
+        # operation_description='我是 GET 的說明',
+        manual_parameters=[
+            openapi.Parameter(
+                name='name_id',
+                in_=openapi.IN_QUERY,
+                description='學名ID',
+                type=openapi.TYPE_INTEGER
+            ),
+            openapi.Parameter(
+                name='scientific_name',
+                in_=openapi.IN_QUERY,
+                description='學名',
+                type=openapi.TYPE_STRING
+            ),
+            openapi.Parameter(
+                name='taxon_group',
+                in_=openapi.IN_QUERY,
+                description='分類群',
+                type=openapi.TYPE_STRING
+            ),
+            openapi.Parameter(
+                name='created_at',
+                in_=openapi.IN_QUERY,
+                description='建立日期',
+                type=openapi.FORMAT_DATE
+            ),
+            openapi.Parameter(
+                name='updated_at',
+                in_=openapi.IN_QUERY,
+                description='更新日期',
+                type=openapi.FORMAT_DATE
+            ),
+            openapi.Parameter(
+                name='limit',
+                in_=openapi.IN_QUERY,
+                description='每頁限制筆數',
+                type=openapi.TYPE_INTEGER
+            ),
+            openapi.Parameter(
+                name='offset',
+                in_=openapi.IN_QUERY,
+                description='指定每頁起始編號',
+                type=openapi.TYPE_INTEGER
+            ),
+        ]
+    )
     def get(self, request, *args, **krgs):
         # print(type(request.GET.get('limit', 20)), request.GET.get('page', 1))
-
         try:
             limit = int(request.GET.get('limit', 20))
-            page = int(request.GET.get('page', 1))
+            offset = int(request.GET.get('offset', 0))
         except:
-            response = {"status": {"code": 400, "message": "Bad Request: Type error of limit or page"}}
-            return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
+            # 如果有錯的話直接改成預設值
+            limit = 20
+            offset = 0
+            # response = {"status": {"code": 400, "message": "Bad Request: Type error of limit or page"}}
+            # return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
 
         try:
-            if request.GET.keys() and not set(list(request.GET.keys())) <= set(['name_id', 'scientific_name', 'common_name', 'updated_at', 'created_at', 'taxon_group', 'limit', 'page']):
+            if request.GET.keys() and not set(list(request.GET.keys())) <= set(['name_id', 'scientific_name', 'common_name', 'updated_at', 'created_at', 'taxon_group', 'limit', 'offset']):
                 response = {"status": {"code": 400, "message": "Bad Request: Unsupported parameters"}}
                 return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
             # elif not isinstance(request.GET.get('limit', 20), int) or not isinstance(request.GET.get('page', 1), int):
@@ -144,6 +257,7 @@ class NameView(APIView):
                             LEFT JOIN nomenclatures AS n ON tn.nomenclature_id = n.id \
                             LEFT JOIN ranks AS r ON tn.rank_id = r.id \
                             LEFT JOIN reference_usages AS ru ON tn.id = ru.taxon_name_id"
+            c_query = "SELECT COUNT(*) FROM taxon_names tn"
 
             # name_id, nomenclature_id, rank_id, simple_name, name_author, tn_properties, original_name_id, note
             # created_at, updated_at, nomenclature_name, rank, is_hybrid, protologue, type_name_id, latin_genus,
@@ -162,11 +276,14 @@ class NameView(APIView):
 
             if name_id:  # 不考慮其他條件
                 query = f"{common_query} WHERE tn.id = '{name_id}'"
+                count_query = f"{c_query} WHERE tn.id = '{name_id}'"
                 # print('name_id: ', query)
             elif scientific_name:  # 不考慮分類群, scientific_name, updated_at, created_at
                 query = f"{common_query} WHERE tn.name = '{scientific_name}'"
+                count_query = f"{c_query} WHERE tn.name = '{scientific_name}'"
                 for c in conditions:
                     query += " AND " + c
+                    count_query += " AND " + c
                 # print('name: ', query)
             elif taxon_group:
                 # 先由 學名 / 中文名 找出符合的name_id
@@ -180,11 +297,18 @@ class NameView(APIView):
                 all_child_results = ()
                 for r in results:  # could be more than 1
                     current_id = r[0]
-                    query_taxon_group = f"select  taxon_name_id \
-                                    from    (select * from reference_usages order by parent_taxon_name_id, taxon_name_id) reference_usages, \
-                                            (select @pv := '{current_id}') initialisation \
-                                    where   find_in_set(parent_taxon_name_id, @pv) > 0 \
-                                    and     @pv := concat(@pv, ',', taxon_name_id) \
+                    # get recursive names
+                    query_taxon_group = f"with recursive cte (id, taxon_name_id, parent_taxon_name_id) as ( \
+                                        select     id, taxon_name_id,parent_taxon_name_id \
+                                        from       reference_usages \
+                                        where      parent_taxon_name_id = {current_id} \
+                                        union all \
+                                        select     ru.id, ru.taxon_name_id, ru.parent_taxon_name_id \
+                                        from       reference_usages ru \
+                                        inner join cte \
+                                                on ru.parent_taxon_name_id = cte.taxon_name_id \
+                                        ) \
+                                        select taxon_name_id from cte \
                                     "
                     # conn = pymysql.connect(**db_settings)
                     with conn.cursor() as cursor:
@@ -196,40 +320,38 @@ class NameView(APIView):
 
                 if all_results:
                     query = f"{common_query} WHERE tn.id IN {str(tuple((item[0] for item in all_results)))}"
+                    count_query = f"{c_query} WHERE tn.id IN {str(tuple((item[0] for item in all_results)))}"
                     for c in conditions:
                         query += " AND " + c
+                        count_query += " AND " + c
                 else:
                     # 沒有結果的狀態
                     query = f"{common_query} LIMIT 0"
+                    count_query = f"{c_query} LIMIT 0"
                 # print('taxon_group: ', query)
             else:
                 # updated_at, created_at or no condition
                 if len(conditions) == 1:
                     query = f"{common_query} WHERE {conditions[0]}"
+                    count_query = f"{c_query} WHERE {conditions[0]}"
                 elif len(conditions) == 2:
                     query = f"{common_query} WHERE {conditions[0]} AND {conditions[1]}"
+                    count_query = f"{c_query} WHERE {conditions[0]} AND {conditions[1]}"
                 else:  # len == 0
                     query = common_query
+                    count_query = c_query
                 # print('else: ', query)
             with conn.cursor() as cursor:
+                query += f' LIMIT {limit} OFFSET {offset}'  # 只處理限制筆數
                 cursor.execute(query)
-                name_results = cursor.fetchall()
-                name_results = [list(item) for item in name_results]
-                name_results = pd.DataFrame(name_results, columns=['name_id', 'nomenclature_id', 'rank_id', 'simple_name',
-                                                                'name_author', 'tn_properties', 'original_name_id', 'note',
-                                                                'created_at', 'updated_at', 'nomenclature_name', 'rank', 'is_hybrid', 'protologue', 'type_name_id', 'name'])
+                current_df = cursor.fetchall()
+                current_df = [list(item) for item in current_df]
+                current_df = pd.DataFrame(current_df, columns=['name_id', 'nomenclature_id', 'rank_id', 'simple_name',
+                                                               'name_author', 'tn_properties', 'original_name_id', 'note',
+                                                               'created_at', 'updated_at', 'nomenclature_name', 'rank', 'is_hybrid', 'protologue', 'type_name_id', 'name'])
 
-                len_total = len(name_results)
-                # pagination
-                paginator = Paginator(name_results, limit)
-                total_page = paginator.num_pages
-                if page > total_page:
-                    response = {"status": {"code": 400, "message": "Bad Request: Page does not exist"}}
-                    return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
-
-                # 只處理限制筆數
-                current_df = paginator.page(page).object_list
-                # find type_name
+                cursor.execute(count_query)
+                len_total = cursor.fetchall()[0][0]
                 current_df['type_name'] = None
                 for t in current_df.type_name_id:
                     if t:
@@ -251,7 +373,7 @@ class NameView(APIView):
                             cursor.execute(query_hybrid_parent)
                             hybrid_name_result = cursor.fetchall()
                         hybrid_names = ', '.join(item[0]
-                                                for item in hybrid_name_result)
+                                                 for item in hybrid_name_result)
                         current_df.loc[current_df.name_id == current_df.loc[h]['name_id'], 'hybrid_parent'] = hybrid_names
 
                 # organize results
@@ -286,9 +408,9 @@ class NameView(APIView):
                 current_df.loc[current_df['name_author'] == "", 'name_author'] = None
 
                 response = {"status": {"code": 200, "message": "Success"},
-                            "info": {"total": len_total, "limit": limit, "current_page": page, "total_page": total_page}, "data": current_df.to_dict('records')}
+                            "info": {"total": len_total, "limit": limit, "offset": offset}, "data": current_df.to_dict('records')}
         except:
-            response = {"status": {"code": 500,"message": "Unexpected Error"}}
+            response = {"status": {"code": 500, "message": "Unexpected Error"}}
 
         return HttpResponse(json.dumps(response, ensure_ascii=False, cls=DateTimeEncoder), content_type="application/json,charset=utf-8")
         # https://www.django-rest-framework.org/api-guide/exceptions/

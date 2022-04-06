@@ -25,22 +25,23 @@ from drf_yasg import openapi
 
 
 schema_view = get_schema_view(
-   openapi.Info(
-      title="TaiCoL API",
-      default_version='v1',
-      description="開發測試",
-    #   terms_of_service="https://www.google.com/policies/terms/",
-    #   contact=openapi.Contact(email="contact@snippets.local"),
-    #   license=openapi.License(name="BSD License"),
-   ),
-   public=True,
-   permission_classes=(permissions.AllowAny,),
+    openapi.Info(
+        title="TaiCOL API",
+        default_version='v1',
+        description="開發測試",
+        #   terms_of_service="https://www.google.com/policies/terms/",
+        #   contact=openapi.Contact(email="contact@snippets.local"),
+        #   license=openapi.License(name="BSD License"),
+    ),
+    public=True,
+    permission_classes=(permissions.AllowAny,),
 )
 
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('v1/name', api_view.NameView.as_view()),
+    path('v1/taxon', api_view.TaxonView.as_view()),
     url(r'^swagger(?P<format>\.json|\.yaml)$', schema_view.without_ui(cache_timeout=0), name='schema-json'),
     url(r'^swagger/$', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
     url(r'^redoc/$', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
