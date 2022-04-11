@@ -48,6 +48,58 @@ class DateTimeEncoder(JSONEncoder):
             return obj.isoformat()
 
 
+class HigherTaxaView(APIView):
+    @swagger_auto_schema(
+        operation_summary='取得較高階層',
+        # operation_description='我是 GET 的說明',
+        manual_parameters=[
+            # 暫時先不做
+            # openapi.Parameter(
+            #     name='concept_id',
+            #     in_=openapi.IN_QUERY,
+            #     description='分類觀',
+            #     type=openapi.TYPE_INTEGER
+            # ),
+            openapi.Parameter(
+                name='taxon_id',
+                in_=openapi.IN_QUERY,
+                description='物種ID',
+                type=openapi.TYPE_STRING
+            ),
+        ]
+    )
+    def get(self, request, *args, **krgs):
+
+        if request.GET.keys() and not set(list(request.GET.keys())) <= set(['taxon_id']):
+            response = {"status": {"code": 400, "message": "Bad Request: Unsupported parameters"}}
+            return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
+
+        try:
+            data = []  # 如果沒有輸入taxon_id, 不回傳資料
+            if taxon_id := request.GET.get('taxon_id'):
+                # 取得child_taxon_id = taxon_id的所有資料，但不包含自己
+                query = f"SELECT distinct(th.parent_taxon_id), t.accepted_taxon_name_id, tn.name, tn.formatted_authors, an.name_with_tag, t.rank_id, t.common_name_c \
+                        FROM api_taxon_hierarchy th \
+                        JOIN api_taxon t ON th.parent_taxon_id = t.taxon_id \
+                        JOIN taxon_names tn ON t.accepted_taxon_name_id = tn.id \
+                        JOIN api_names an ON t.accepted_taxon_name_id = an.taxon_name_id \
+                        WHERE th.parent_taxon_id != '{taxon_id}' and th.child_taxon_id = '{taxon_id}' \
+                        ORDER BY t.rank_id DESC"
+                conn = pymysql.connect(**db_settings)
+                with conn.cursor() as cursor:
+                    cursor.execute(query)
+                    results = cursor.fetchall()
+                    for r in results:
+                        data += [{'taxon_id': r[0], 'name_id': r[1], 'simple_name': r[2], 'name_author': r[3], 'formatted_name': r[4],
+                                  'rank': rank_map[r[5]], 'common_name_c': r[6]}]
+            response = {"status": {"code": 200, "message": "Success"},
+                        "data": data}
+        except:
+            response = {"status": {"code": 500, "message": "Unexpected Error"}}
+
+        return HttpResponse(json.dumps(response, ensure_ascii=False, cls=DateTimeEncoder), content_type="application/json,charset=utf-8")
+
+
 class TaxonView(APIView):
     @swagger_auto_schema(
         operation_summary='取得物種',
