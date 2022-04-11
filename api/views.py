@@ -1,4 +1,5 @@
 from os import error
+from re import L
 from django.shortcuts import render
 from django.http import (
     JsonResponse,
@@ -19,6 +20,8 @@ from rest_framework.views import APIView
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 from rest_framework.schemas import AutoSchema
+
+from .utils import rank_map_c, rank_map
 
 
 db_settings = {
@@ -147,13 +150,133 @@ class TaxonView(APIView):
 
         try:
             limit = int(request.GET.get('limit', 20))
-            offset = int(request.GET.get('offset', 1))
+            offset = int(request.GET.get('offset', 0))
         except:
-            response = {"status": {"code": 400, "message": "Bad Request: Type error of limit or page"}}
+            # 如果有錯的話直接改成預設值
+            limit = 20
+            offset = 0
+
+        if request.GET.keys() and not set(
+            list(request.GET.keys())) <= set(
+            ['taxon_id', 'taxon_group', 'updated_at', 'created_at', 'limit', 'offset', 'is_hybrid', 'is_endemic', 'alien_type', 'is_fossil', 'is_terrestrial', 'is_freshwater', 'is_brackish',
+             'is_marine']):
+            response = {"status": {"code": 400, "message": "Bad Request: Unsupported parameters"}}
             return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
 
-        response = {}
-        return HttpResponse(json.dumps(response, ensure_ascii=False, cls=DateTimeEncoder), content_type="application/json,charset=utf-8")
+        # only consider first parameter
+        taxon_id = request.GET.get('taxon_id', '').strip()
+        taxon_group = request.GET.get('taxon_group', '').strip()
+        updated_at = request.GET.get('updated_at', '').strip()
+        created_at = request.GET.get('created_at', '').strip()
+        limit = 300 if limit > 300 else limit  # 最大值 300
+
+        conn = pymysql.connect(**db_settings)
+        query = "SELECT t.taxon_id, t.rank_id, t.accepted_taxon_name_id, t.common_name_c, t.alternative_name_c, \
+                        t.is_hybrid, t.is_endemic, t.alien_type, t.is_fossil, t.is_terrestrial, \
+                        t.is_freshwater, t.is_brackish, t.is_marine, t.cites, t.iucn, t.redlist, t.protected, t.sensitive, \
+                        t.created_at, t.updated_at, tn.name, tn.formatted_authors, an.name_with_tag FROM api_taxon t \
+                        JOIN taxon_names tn ON t.accepted_taxon_name_id = tn.id \
+                        JOIN api_names an ON t.accepted_taxon_name_id = an.taxon_name_id"
+        count_query = "SELECT COUNT(*) FROM api_taxon t"
+
+        if taxon_id:  # 不考慮其他條件
+            query = f"{query} WHERE t.taxon_id = '{taxon_id}'"
+            count_query = f"{count_query} WHERE t.taxon_id = '{taxon_id}'"
+        else:
+            conditions = []
+            for i in ['is_hybrid', 'is_endemic', 'is_fossil', 'is_terrestrial', 'is_freshwater', 'is_brackish', 'is_marine']:
+                var = request.GET.get(i, '').strip()
+                if var == 'true':
+                    conditions += [f"t.{i} = 1"]
+                elif var == 'false':
+                    conditions += [f"{i} = 0"]
+            if var := request.GET.get('t.alien_type', '').strip():
+                conditions += [f"t.alien_type = '{var}'"]
+            if updated_at:
+                if not validate(updated_at):
+                    response = {"status": {"code": 400, "message": "Bad Request: Incorrect DATE(updated_at) value"}}
+                    return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
+                conditions += [f"date(t.updated_at) > '{updated_at}'"]
+            if created_at:
+                if not validate(created_at):
+                    response = {"status": {"code": 400, "message": "Bad Request: Incorrect DATE(created_at) value"}}
+                    return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
+                conditions += [f"date(t.created_at) > '{created_at}'"]
+            if taxon_group:
+                # 先抓taxon_id再判斷有沒有其他condition要考慮
+                query_1 = f"SELECT th.child_taxon_id FROM taxon_names tn \
+                    JOIN api_taxon_usages tu ON tn.id = tu.taxon_name_id \
+                    JOIN api_taxon t ON tu.taxon_id = t.taxon_id \
+                    JOIN api_taxon_hierarchy th ON tu.taxon_id = th.parent_taxon_id \
+                    WHERE tn.name = '{taxon_group}' OR t.common_name_c = '{taxon_group}' OR find_in_set('{taxon_group}',t.alternative_name_c) "
+                with conn.cursor() as cursor:
+                    cursor.execute(query_1)
+                    results = cursor.fetchall()
+                    if results:
+                        results = str([i[0] for i in results]).replace('[', '(').replace(']', ')')
+                        conditions += [f"t.taxon_id IN {results}"]
+                    else:  # 如果沒有結果的話用回傳空值
+                        response = {"status": {"code": 200, "message": "Success"},
+                                    "info": {"total": 0, "limit": limit, "offset": offset}, "data": []}
+                        return HttpResponse(json.dumps(response, ensure_ascii=False, cls=DateTimeEncoder), content_type="application/json,charset=utf-8")
+
+            for l in range(len(conditions)):
+                if l == 0:
+                    query = f"{query} WHERE {conditions[l]}"
+                    count_query = f"{count_query} WHERE {conditions[l]}"
+                else:
+                    query += f' AND {conditions[l]}'
+                    count_query += f" AND {conditions[l]}"
+
+        with conn.cursor() as cursor:
+            cursor.execute(count_query)
+            len_total = cursor.fetchall()[0][0]
+            query += f' LIMIT {limit} OFFSET {offset}'  # 只處理限制筆數
+            print(query)
+            cursor.execute(query)
+            df = pd.DataFrame(cursor.fetchall(), columns=['taxon_id', 'rank', 'name_id', 'common_name_c', 'alternative_name_c',
+                                                          'is_hybrid', 'is_endemic', 'alien_type', 'is_fossil', 'is_terrestrial',
+                                                          'is_freshwater', 'is_brackish', 'is_marine', 'cites', 'iucn', 'redlist', 'protected', 'sensitive',
+                                                          'created_at', 'updated_at', 'simple_name', 'name_author', 'formatted_name'])
+            # 0, 1 要轉成true, false (但可能會有null)
+            if len(df):
+                is_list = ['is_hybrid', 'is_endemic', 'is_fossil', 'is_terrestrial', 'is_freshwater', 'is_brackish', 'is_marine']
+                df[is_list] = df[is_list].replace({0: False, 1: True})
+                # 階層
+                df['rank'] = df['rank'].apply(lambda x: rank_map[x])
+                # 日期格式 yy-mm-dd
+                df['created_at'] = df.created_at.dt.strftime('%Y-%m-%d')
+                df['updated_at'] = df.updated_at.dt.strftime('%Y-%m-%d')
+                # 同物異名 & 誤用名
+                df['synonyms'] = ''
+                df['formatted_synonyms'] = ''
+                df['misapplied'] = ''
+                df['formatted_misapplied'] = ''
+                query = f"SELECT tu.taxon_id, tu.status, GROUP_CONCAT(an.name_with_tag SEPARATOR ','), GROUP_CONCAT(tn.name SEPARATOR ',') \
+                FROM api_taxon_usages tu \
+                JOIN api_names an ON tu.taxon_name_id = an.taxon_name_id \
+                JOIN taxon_names tn ON tu.taxon_name_id = tn.id \
+                WHERE tu.taxon_id IN (%s) and tu.status IN ('synonyms', 'misapplied') \
+                GROUP BY tu.status, tu.taxon_id;"
+                cursor.execute(query, ','.join(df.taxon_id.to_list()))
+                other_names = cursor.fetchall()
+                for o in other_names:
+                    if o[1] == 'synonyms':
+                        df.loc[df['taxon_id'] == o[0], 'synonyms'] = o[3]
+                        df.loc[df['taxon_id'] == o[0], 'formatted_synonyms'] = o[2]
+                    elif o[1] == 'misapplied':
+                        df.loc[df['taxon_id'] == o[0], 'misapplied'] = o[3]
+                        df.loc[df['taxon_id'] == o[0], 'formatted_misapplied'] = o[2]
+                # 排序
+                df = df[['taxon_id', 'name_id', 'simple_name', 'name_author', 'formatted_name', 'synonyms', 'formatted_synonyms', 'misapplied', 'formatted_misapplied',
+                        'rank', 'common_name_c', 'alternative_name_c', 'is_hybrid', 'is_endemic', 'alien_type', 'is_fossil', 'is_terrestrial', 'is_freshwater', 'is_brackish',
+                         'is_marine', 'cites', 'iucn', 'redlist', 'protected', 'sensitive', 'created_at', 'updated_at']]
+
+            # 加上其他欄位
+            response = {"status": {"code": 200, "message": "Success"},
+                        "info": {"total": len_total, "limit": limit, "offset": offset}, "data": df.to_dict('records')}
+
+            return HttpResponse(json.dumps(response, ensure_ascii=False, cls=DateTimeEncoder), content_type="application/json,charset=utf-8")
 
 
 class NameView(APIView):
@@ -226,14 +349,12 @@ class NameView(APIView):
                 return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
             # elif not isinstance(request.GET.get('limit', 20), int) or not isinstance(request.GET.get('page', 1), int):
 
-            # only consider first parameter
-            name_id = request.GET.getlist('name_id', [''])[0].lstrip().rstrip()
-            scientific_name = request.GET.getlist('scientific_name', [''])[0].lstrip().rstrip()
-            updated_at = request.GET.getlist('updated_at', [''])[0].lstrip().rstrip()
-            created_at = request.GET.getlist('created_at', [''])[0].lstrip().rstrip()
-            taxon_group = request.GET.getlist('taxon_group', [''])[0].lstrip().rstrip()
-            # limit = request.GET.get('limit', 20)
-            # page = request.GET.get('page', 1)
+            # 如果有重複的參數，只考慮最後面的那個 (default)
+            name_id = request.GET.get('name_id', '').strip()
+            scientific_name = request.GET.get('scientific_name', '').strip()
+            updated_at = request.GET.get('updated_at', '').strip()
+            created_at = request.GET.get('created_at', '').strip()
+            taxon_group = request.GET.get('taxon_group', '').strip()
             limit = 300 if limit > 300 else limit  # 最大值 300
 
             # print(name_id, scientific_name, updated_at, created_at, taxon_group)
