@@ -232,7 +232,6 @@ class TaxonView(APIView):
             cursor.execute(count_query)
             len_total = cursor.fetchall()[0][0]
             query += f' LIMIT {limit} OFFSET {offset}'  # 只處理限制筆數
-            print(query)
             cursor.execute(query)
             df = pd.DataFrame(cursor.fetchall(), columns=['taxon_id', 'rank', 'name_id', 'common_name_c', 'alternative_name_c',
                                                           'is_hybrid', 'is_endemic', 'alien_type', 'is_fossil', 'is_terrestrial',
@@ -373,11 +372,12 @@ class NameView(APIView):
                                     's3_rank',JSON_EXTRACT(tn.properties,'$.\"s3_rank\"'), \
                                     'latin_s3',JSON_EXTRACT(tn.properties,'$.\"latin_s3\"'), \
                                     's4_rank',JSON_EXTRACT(tn.properties,'$.\"s4_rank\"'), \
-                                    'latin_s4',JSON_EXTRACT(tn.properties,'$.\"latin_s4\"'))\
+                                    'latin_s4',JSON_EXTRACT(tn.properties,'$.\"latin_s4\"')), an.name_with_tag \
                             FROM taxon_names AS tn \
                             LEFT JOIN nomenclatures AS n ON tn.nomenclature_id = n.id \
                             LEFT JOIN ranks AS r ON tn.rank_id = r.id \
-                            LEFT JOIN reference_usages AS ru ON tn.id = ru.taxon_name_id"
+                            LEFT JOIN reference_usages AS ru ON tn.id = ru.taxon_name_id \
+                            LEFT JOIN api_names as an ON tn.id = an.taxon_name_id"
             c_query = "SELECT COUNT(*) FROM taxon_names tn"
 
             # name_id, nomenclature_id, rank_id, simple_name, name_author, tn_properties, original_name_id, note
@@ -429,8 +429,7 @@ class NameView(APIView):
                                         inner join cte \
                                                 on ru.parent_taxon_name_id = cte.taxon_name_id \
                                         ) \
-                                        select taxon_name_id from cte \
-                                    "
+                                        select taxon_name_id from cte"
                     # conn = pymysql.connect(**db_settings)
                     with conn.cursor() as cursor:
                         cursor.execute(query_taxon_group)
@@ -469,7 +468,7 @@ class NameView(APIView):
                 current_df = [list(item) for item in current_df]
                 current_df = pd.DataFrame(current_df, columns=['name_id', 'nomenclature_id', 'rank_id', 'simple_name',
                                                                'name_author', 'tn_properties', 'original_name_id', 'note',
-                                                               'created_at', 'updated_at', 'nomenclature_name', 'rank', 'is_hybrid', 'protologue', 'type_name_id', 'name'])
+                                                               'created_at', 'updated_at', 'nomenclature_name', 'rank', 'is_hybrid', 'protologue', 'type_name_id', 'name', 'formatted_name'])
 
                 cursor.execute(count_query)
                 len_total = cursor.fetchall()[0][0]
@@ -520,7 +519,7 @@ class NameView(APIView):
                     current_df.loc[n, 'name'] = [tmp]
 
                 # subset & rename columns
-                current_df = current_df[['name_id', 'nomenclature_name', 'rank', 'simple_name', 'name_author', 'name', 'original_name_id',
+                current_df = current_df[['name_id', 'nomenclature_name', 'rank', 'simple_name', 'name_author', 'formatted_name', 'name', 'original_name_id',
                                         'is_hybrid', 'hybrid_parent', 'protologue', 'type_name', 'created_at', 'updated_at']]
 
                 current_df['is_hybrid'] = current_df['is_hybrid'].replace('false', False).replace('true', True)
