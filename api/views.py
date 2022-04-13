@@ -99,7 +99,8 @@ class ReferencesView(APIView):
 
             response = {"status": {"code": 200, "message": "Success"},
                         "info": {"total": len_total}, "data": data}
-        except:
+        except Exception as er:
+            print(er)
             response = {"status": {"code": 500, "message": "Unexpected Error"}}
 
         return HttpResponse(json.dumps(response, ensure_ascii=False, cls=DateTimeEncoder), content_type="application/json,charset=utf-8")
@@ -151,7 +152,8 @@ class HigherTaxaView(APIView):
                                   'rank': rank_map[r[5]], 'common_name_c': r[6]}]
             response = {"status": {"code": 200, "message": "Success"},
                         "data": data}
-        except:
+        except Exception as er:
+            print(er)
             response = {"status": {"code": 500, "message": "Unexpected Error"}}
 
         return HttpResponse(json.dumps(response, ensure_ascii=False, cls=DateTimeEncoder), content_type="application/json,charset=utf-8")
@@ -260,7 +262,8 @@ class TaxonView(APIView):
             try:
                 limit = int(request.GET.get('limit', 20))
                 offset = int(request.GET.get('offset', 0))
-            except:
+            except Exception as er:
+                print(er)
                 # 如果有錯的話直接改成預設值
                 limit = 20
                 offset = 0
@@ -275,8 +278,8 @@ class TaxonView(APIView):
             # only consider first parameter
             taxon_id = request.GET.get('taxon_id', '').strip()
             taxon_group = request.GET.get('taxon_group', '').strip()
-            updated_at = request.GET.get('updated_at', '').strip().replace('"', '').replace("'", "")
-            created_at = request.GET.get('created_at', '').strip().replace('"', '').replace("'", "")
+            updated_at = request.GET.get('updated_at', '').strip().strip('"').strip("'")
+            created_at = request.GET.get('created_at', '').strip().strip('"').strip("'")
             limit = 300 if limit > 300 else limit  # 最大值 300
 
             conn = pymysql.connect(**db_settings)
@@ -383,7 +386,8 @@ class TaxonView(APIView):
                 # 加上其他欄位
                 response = {"status": {"code": 200, "message": "Success"},
                             "info": {"total": len_total, "limit": limit, "offset": offset}, "data": df.to_dict('records')}
-        except:
+        except Exception as er:
+            print(er)
             response = {"status": {"code": 500, "message": "Unexpected Error"}}
 
         return HttpResponse(json.dumps(response, ensure_ascii=False, cls=DateTimeEncoder), content_type="application/json,charset=utf-8")
@@ -446,7 +450,8 @@ class NameView(APIView):
         try:
             limit = int(request.GET.get('limit', 20))
             offset = int(request.GET.get('offset', 0))
-        except:
+        except Exception as er:
+            print(er)
             # 如果有錯的話直接改成預設值
             limit = 20
             offset = 0
@@ -462,8 +467,8 @@ class NameView(APIView):
             # 如果有重複的參數，只考慮最後面的那個 (default)
             name_id = request.GET.get('name_id', '').strip()
             scientific_name = request.GET.get('scientific_name', '').strip()
-            updated_at = request.GET.get('updated_at', '').strip().replace('"', '').replace("'", "")
-            created_at = request.GET.get('created_at', '').strip().replace('"', '').replace("'", "")
+            updated_at = request.GET.get('updated_at', '').strip().strip('"').strip("'")
+            created_at = request.GET.get('created_at', '').strip().strip('"').strip("'")
             taxon_group = request.GET.get('taxon_group', '').strip()
             limit = 300 if limit > 300 else limit  # 最大值 300
 
@@ -617,11 +622,10 @@ class NameView(APIView):
                 # remove double quote in rank & protologue field
                 current_df['rank'] = current_df['rank'].replace('\"', '', regex=True)
                 current_df['protologue'] = current_df['protologue'].replace('\"', '', regex=True)
-                # date to string
-                # current_df['created_at'] = current_df['created_at'].dt.strftime(
-                #     '%Y-%m-%d %H:%M:%S')
-                # current_df['updated_at'] = current_df['updated_at'].dt.strftime(
-                #     '%Y-%m-%d %H:%M:%S')
+                # 日期格式 yy-mm-dd
+                if len(current_df):
+                    current_df['created_at'] = current_df.created_at.dt.strftime('%Y-%m-%d')
+                    current_df['updated_at'] = current_df.updated_at.dt.strftime('%Y-%m-%d')
 
                 # remove null/empty/None element in 'name' json
                 for n in current_df.index:
@@ -640,7 +644,8 @@ class NameView(APIView):
 
                 response = {"status": {"code": 200, "message": "Success"},
                             "info": {"total": len_total, "limit": limit, "offset": offset}, "data": current_df.to_dict('records')}
-        except:
+        except Exception as er:
+            print(er)
             response = {"status": {"code": 500, "message": "Unexpected Error"}}
 
         return HttpResponse(json.dumps(response, ensure_ascii=False, cls=DateTimeEncoder), content_type="application/json,charset=utf-8")
