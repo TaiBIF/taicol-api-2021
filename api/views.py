@@ -482,7 +482,7 @@ class NameView(APIView):
                             FROM taxon_names AS tn \
                             JOIN nomenclatures AS n ON tn.nomenclature_id = n.id \
                             JOIN api_names as an ON tn.id = an.taxon_name_id"
-            c_query = "SELECT COUNT(*) FROM taxon_names tn"
+            count_query = "SELECT COUNT(*) FROM taxon_names tn"
 
             conditions = []
             if updated_at:
@@ -498,10 +498,10 @@ class NameView(APIView):
 
             if name_id:  # 不考慮其他條件
                 query = f"{query} WHERE tn.id = '{name_id}'"
-                count_query = f"{c_query} WHERE tn.id = '{name_id}'"
+                count_query = f"{count_query} WHERE tn.id = '{name_id}'"
             elif scientific_name:  # 不考慮分類群, scientific_name, updated_at, created_at
                 query = f"{query} WHERE tn.name = '{scientific_name}'"
-                count_query = f"{c_query} WHERE tn.name = '{scientific_name}'"
+                count_query = f"{count_query} WHERE tn.name = '{scientific_name}'"
                 for c in conditions:
                     query += " AND " + c
                     count_query += " AND " + c
@@ -539,7 +539,7 @@ class NameView(APIView):
 
                 if all_results:
                     query = f"{query} WHERE tn.id IN {str(tuple((item[0] for item in all_results)))}"
-                    count_query = f"{c_query} WHERE tn.id IN {str(tuple((item[0] for item in all_results)))}"
+                    count_query = f"{count_query} WHERE tn.id IN {str(tuple((item[0] for item in all_results)))}"
                     for c in conditions:
                         query += " AND " + c
                         count_query += " AND " + c
@@ -553,7 +553,7 @@ class NameView(APIView):
                 for l in range(len(conditions)):
                     if l == 0:
                         query = f"{query} WHERE {conditions[l]}"
-                        count_query = f"{c_query} WHERE {conditions[l]}"
+                        count_query = f"{count_query} WHERE {conditions[l]}"
                     else:
                         query += f' AND {conditions[l]}'
                         count_query += f" AND {conditions[l]}"
