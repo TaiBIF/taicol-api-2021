@@ -136,7 +136,8 @@ class HigherTaxaView(APIView):
             data = []  # 如果沒有輸入taxon_id, 不回傳資料
             if taxon_id := request.GET.get('taxon_id'):
                 # 取得child_taxon_id = taxon_id的所有資料，但不包含自己
-                query = f"SELECT distinct(th.parent_taxon_id), t.accepted_taxon_name_id, tn.name, tn.formatted_authors, an.name_with_tag, t.rank_id, t.common_name_c \
+                query = f"SELECT distinct(th.parent_taxon_id), t.accepted_taxon_name_id, tn.name, \
+                        tn.formatted_authors, an.name_with_tag, t.rank_id, t.common_name_c \
                         FROM api_taxon_hierarchy th \
                         JOIN api_taxon t ON th.parent_taxon_id = t.taxon_id \
                         JOIN taxon_names tn ON t.accepted_taxon_name_id = tn.id \
@@ -364,11 +365,11 @@ class TaxonView(APIView):
                     df['misapplied'] = ''
                     df['formatted_misapplied'] = ''
                     query = f"SELECT tu.taxon_id, tu.status, GROUP_CONCAT(an.name_with_tag SEPARATOR ','), GROUP_CONCAT(tn.name SEPARATOR ',') \
-                    FROM api_taxon_usages tu \
-                    JOIN api_names an ON tu.taxon_name_id = an.taxon_name_id \
-                    JOIN taxon_names tn ON tu.taxon_name_id = tn.id \
-                    WHERE tu.taxon_id IN (%s) and tu.status IN ('synonyms', 'misapplied') \
-                    GROUP BY tu.status, tu.taxon_id;"
+                                FROM api_taxon_usages tu \
+                                JOIN api_names an ON tu.taxon_name_id = an.taxon_name_id \
+                                JOIN taxon_names tn ON tu.taxon_name_id = tn.id \
+                                WHERE tu.taxon_id IN (%s) and tu.status IN ('synonyms', 'misapplied') \
+                                GROUP BY tu.status, tu.taxon_id;"
                     cursor.execute(query, ','.join(df.taxon_id.to_list()))
                     other_names = cursor.fetchall()
                     for o in other_names:
@@ -452,18 +453,11 @@ class NameView(APIView):
             offset = int(request.GET.get('offset', 0))
         except Exception as er:
             print(er)
-            # 如果有錯的話直接改成預設值
-            limit = 20
-            offset = 0
-            # response = {"status": {"code": 400, "message": "Bad Request: Type error of limit or page"}}
-            # return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
-
+            limit, offset = 20, 0  # 如果有錯的話直接改成預設值
         try:
             if request.GET.keys() and not set(list(request.GET.keys())) <= set(['name_id', 'scientific_name', 'common_name', 'updated_at', 'created_at', 'taxon_group', 'limit', 'offset']):
                 response = {"status": {"code": 400, "message": "Bad Request: Unsupported parameters"}}
                 return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
-            # elif not isinstance(request.GET.get('limit', 20), int) or not isinstance(request.GET.get('page', 1), int):
-
             # 如果有重複的參數，只考慮最後面的那個 (default)
             name_id = request.GET.get('name_id', '').strip()
             scientific_name = request.GET.get('scientific_name', '').strip()
@@ -474,31 +468,22 @@ class NameView(APIView):
 
             # print(name_id, scientific_name, updated_at, created_at, taxon_group)
             conn = pymysql.connect(**db_settings)
-            common_query = "SELECT tn.id, tn.nomenclature_id, tn.rank_id, tn.name, tn.formatted_authors, \
-                            tn.properties, tn.original_taxon_name_id, tn.note, tn.created_at, tn.updated_at, \
-                            n.name , JSON_EXTRACT(r.display,'$.\"en-us\"'), \
-                            JSON_EXTRACT(tn.properties,'$.\"is_hybrid_formula\"'), \
-                            JSON_EXTRACT(tn.properties,'$.\"reference_name\"'), \
-                            JSON_EXTRACT(tn.properties,'$.\"type_name\"'), \
-                            JSON_OBJECT( \
-                                    'latin_genus', JSON_EXTRACT(tn.properties,'$.\"latin_genus\"'), \
-                                    'latin_s1', JSON_EXTRACT(tn.properties,'$.\"latin_s1\"') ,\
-                                    's2_rank', JSON_EXTRACT(tn.properties,'$.\"s2_rank\"'), \
-                                    'latin_s2', JSON_EXTRACT(tn.properties,'$.\"latin_s2\"'), \
-                                    's3_rank',JSON_EXTRACT(tn.properties,'$.\"s3_rank\"'), \
-                                    'latin_s3',JSON_EXTRACT(tn.properties,'$.\"latin_s3\"'), \
-                                    's4_rank',JSON_EXTRACT(tn.properties,'$.\"s4_rank\"'), \
-                                    'latin_s4',JSON_EXTRACT(tn.properties,'$.\"latin_s4\"')), an.name_with_tag \
+            # TODO protologue需要根據顯示邏輯呈現
+            query = "SELECT tn.id, tn.rank_id, tn.name, tn.formatted_authors, \
+                            tn.original_taxon_name_id, tn.note, tn.created_at, tn.updated_at, \
+                            n.name, \
+                            JSON_EXTRACT(tn.properties,'$.is_hybrid_formula'), \
+                            tn.properties ->> '$.reference_name', \
+                            tn.properties ->> '$.type_name', \
+                            tn.properties ->> '$.latin_genus', \
+                            tn.properties ->> '$.latin_s1',\
+                            tn.properties ->> '$.species_layers',\
+                            an.name_with_tag \
                             FROM taxon_names AS tn \
-                            LEFT JOIN nomenclatures AS n ON tn.nomenclature_id = n.id \
-                            LEFT JOIN ranks AS r ON tn.rank_id = r.id \
-                            LEFT JOIN reference_usages AS ru ON tn.id = ru.taxon_name_id \
-                            LEFT JOIN api_names as an ON tn.id = an.taxon_name_id"
+                            JOIN nomenclatures AS n ON tn.nomenclature_id = n.id \
+                            JOIN api_names as an ON tn.id = an.taxon_name_id"
             c_query = "SELECT COUNT(*) FROM taxon_names tn"
 
-            # name_id, nomenclature_id, rank_id, simple_name, name_author, tn_properties, original_name_id, note
-            # created_at, updated_at, nomenclature_name, rank, is_hybrid, protologue, type_name_id, latin_genus,
-            # latin_s1, s2_rank, latin_s2, s3_rank, latin_s3, s4_rank, latin_s4
             conditions = []
             if updated_at:
                 if not validate(updated_at):
@@ -512,16 +497,14 @@ class NameView(APIView):
                 conditions += [f"date(tn.created_at) > '{created_at}'"]
 
             if name_id:  # 不考慮其他條件
-                query = f"{common_query} WHERE tn.id = '{name_id}'"
+                query = f"{query} WHERE tn.id = '{name_id}'"
                 count_query = f"{c_query} WHERE tn.id = '{name_id}'"
-                # print('name_id: ', query)
             elif scientific_name:  # 不考慮分類群, scientific_name, updated_at, created_at
-                query = f"{common_query} WHERE tn.name = '{scientific_name}'"
+                query = f"{query} WHERE tn.name = '{scientific_name}'"
                 count_query = f"{c_query} WHERE tn.name = '{scientific_name}'"
                 for c in conditions:
                     query += " AND " + c
                     count_query += " AND " + c
-                # print('name: ', query)
             elif taxon_group:
                 # 先由 學名 / 中文名 找出符合的name_id
                 query_1 = f"SELECT id FROM taxon_names WHERE name = '{taxon_group}'"
@@ -555,95 +538,92 @@ class NameView(APIView):
                 all_results = results + all_child_results
 
                 if all_results:
-                    query = f"{common_query} WHERE tn.id IN {str(tuple((item[0] for item in all_results)))}"
+                    query = f"{query} WHERE tn.id IN {str(tuple((item[0] for item in all_results)))}"
                     count_query = f"{c_query} WHERE tn.id IN {str(tuple((item[0] for item in all_results)))}"
                     for c in conditions:
                         query += " AND " + c
                         count_query += " AND " + c
                 else:
                     # 沒有結果的狀態
-                    query = f"{common_query} LIMIT 0"
-                    count_query = f"{c_query} LIMIT 0"
+                    response = {"status": {"code": 200, "message": "Success"},
+                                "info": {"total": 0, "limit": limit, "offset": offset}, "data": []}
+                    return HttpResponse(json.dumps(response, ensure_ascii=False, cls=DateTimeEncoder), content_type="application/json,charset=utf-8")
                 # print('taxon_group: ', query)
             else:
-                # updated_at, created_at or no condition
-                if len(conditions) == 1:
-                    query = f"{common_query} WHERE {conditions[0]}"
-                    count_query = f"{c_query} WHERE {conditions[0]}"
-                elif len(conditions) == 2:
-                    query = f"{common_query} WHERE {conditions[0]} AND {conditions[1]}"
-                    count_query = f"{c_query} WHERE {conditions[0]} AND {conditions[1]}"
-                else:  # len == 0
-                    query = common_query
-                    count_query = c_query
+                for l in range(len(conditions)):
+                    if l == 0:
+                        query = f"{query} WHERE {conditions[l]}"
+                        count_query = f"{c_query} WHERE {conditions[l]}"
+                    else:
+                        query += f' AND {conditions[l]}'
+                        count_query += f" AND {conditions[l]}"
                 # print('else: ', query)
             with conn.cursor() as cursor:
                 query += f' LIMIT {limit} OFFSET {offset}'  # 只處理限制筆數
                 cursor.execute(query)
-                current_df = cursor.fetchall()
-                current_df = [list(item) for item in current_df]
-                current_df = pd.DataFrame(current_df, columns=['name_id', 'nomenclature_id', 'rank_id', 'simple_name',
-                                                               'name_author', 'tn_properties', 'original_name_id', 'note',
-                                                               'created_at', 'updated_at', 'nomenclature_name', 'rank', 'is_hybrid', 'protologue', 'type_name_id', 'name', 'formatted_name'])
+                df = cursor.fetchall()
+                df = [list(item) for item in df]
+                df = pd.DataFrame(df, columns=['name_id', 'rank', 'simple_name', 'name_author', 'original_name_id', 'note',
+                                               'created_at', 'updated_at', 'nomenclature_name', 'is_hybrid', 'protologue',
+                                               'type_name_id', 'latin_genus', 'latin_s1', 'species_layers', 'formatted_name'])
 
                 cursor.execute(count_query)
                 len_total = cursor.fetchall()[0][0]
-                current_df['type_name'] = None
-                for t in current_df.type_name_id:
+                # only rank >= 34 has 物種學名分欄 & original_name_id
+                df.loc[df['rank'] < 34, 'name'] = '{}'
+                df.loc[df['rank'] < 34, 'original_name_id'] = None
+                df['rank'] = df['rank'].apply(lambda x: rank_map[x])
+                df['type_name'] = None
+                for t in df.type_name_id:
                     if t:
                         query_type_name = f"SELECT name FROM taxon_names WHERE id = {t}"
                         with conn.cursor() as cursor:
                             cursor.execute(query_type_name)
                             type_name_result = cursor.fetchone()
                         if type_name_result:
-                            current_df.loc[current_df.type_name_id == t, 'type_name'] = type_name_result[0]
-
+                            df.loc[df.type_name_id == t, 'type_name'] = type_name_result[0]
                 # find hybrid_parent
-                current_df['hybrid_parent'] = None
-                for h in current_df[['is_hybrid', 'name_id']].index:
-                    if current_df.loc[h]['is_hybrid'] == 'true':
-                        query_hybrid_parent = f"SELECT tn.name FROM taxon_name_hybrid_parent AS tnhp \
-                                                LEFT JOIN taxon_names AS tn ON tn.id = tnhp.parent_taxon_name_id \
-                                                WHERE tnhp.taxon_name_id = {current_df.loc[h]['name_id']} "
+                df['hybrid_parent'] = None
+                for h in df[['is_hybrid', 'name_id']].index:
+                    if df.loc[h]['is_hybrid'] == 'true':
+                        query_hybrid_parent = f"SELECT GROUP_CONCAT( CONCAT(tn.name, ' ',tn.formatted_authors) SEPARATOR ' × ' ) FROM taxon_name_hybrid_parent AS tnhp \
+                                                JOIN taxon_names AS tn ON tn.id = tnhp.parent_taxon_name_id \
+                                                WHERE tnhp.taxon_name_id = {df.loc[h]['name_id']} \
+                                                GROUP BY tnhp.taxon_name_id"
                         with conn.cursor() as cursor:
                             cursor.execute(query_hybrid_parent)
                             hybrid_name_result = cursor.fetchall()
-                        hybrid_names = ', '.join(item[0]
-                                                 for item in hybrid_name_result)
-                        current_df.loc[current_df.name_id == current_df.loc[h]['name_id'], 'hybrid_parent'] = hybrid_names
+                        df.loc[df.name_id == df.loc[h]['name_id'], 'hybrid_parent'] = hybrid_name_result[0]
 
                 # organize results
-                # only rank >= 34 has 物種學名分欄 & original_name_id
-                current_df.loc[current_df.rank_id < 34, 'name'] = '{}'
-                current_df.loc[current_df.rank_id < 34, 'original_name_id'] = None
+                df = df.replace({np.nan: None})
 
-                current_df = current_df.replace({np.nan: None})
-
-                # remove double quote in rank & protologue field
-                current_df['rank'] = current_df['rank'].replace('\"', '', regex=True)
-                current_df['protologue'] = current_df['protologue'].replace('\"', '', regex=True)
                 # 日期格式 yy-mm-dd
-                if len(current_df):
-                    current_df['created_at'] = current_df.created_at.dt.strftime('%Y-%m-%d')
-                    current_df['updated_at'] = current_df.updated_at.dt.strftime('%Y-%m-%d')
+                if len(df):
+                    df['created_at'] = df.created_at.dt.strftime('%Y-%m-%d')
+                    df['updated_at'] = df.updated_at.dt.strftime('%Y-%m-%d')
 
                 # remove null/empty/None element in 'name' json
-                for n in current_df.index:
-                    tmp = json.loads(str(current_df.name[n]))
-                    tmp = {k: v for k, v in tmp.items() if v}
-                    current_df.loc[n, 'name'] = [tmp]
+                for n in df.index:
+                    name = {'latin_genus': df.latin_genus[n], 'latin_s1': df.latin_s1[n]}
+                    count = 2
+                    for s in eval(df.species_layers[n]):
+                        if s.get('rank_abbreviation') and s.get('latin_name'):
+                            name.update({f's{count}_rank': s.get('rank_abbreviation'), f'latin_s{count}': s.get('latin_name')})
+                            count += 1
+                    name = {k: v for k, v in name.items() if v and v != 'null'}
+                    df.loc[n, 'name'] = [name]
 
                 # subset & rename columns
-                current_df = current_df[['name_id', 'nomenclature_name', 'rank', 'simple_name', 'name_author', 'formatted_name', 'name', 'original_name_id',
-                                        'is_hybrid', 'hybrid_parent', 'protologue', 'type_name', 'created_at', 'updated_at']]
+                df = df[['name_id', 'nomenclature_name', 'rank', 'simple_name', 'name_author', 'formatted_name', 'name', 'original_name_id',
+                         'is_hybrid', 'hybrid_parent', 'protologue', 'type_name', 'created_at', 'updated_at']]
 
-                current_df['is_hybrid'] = current_df['is_hybrid'].replace('false', False).replace('true', True)
+                df['is_hybrid'] = df['is_hybrid'].replace('false', False).replace('true', True)
 
-                current_df.loc[current_df['protologue'] == "null", 'protologue'] = None
-                current_df.loc[current_df['name_author'] == "", 'name_author'] = None
-
+                df.loc[df['protologue'] == "null", 'protologue'] = None
+                df.loc[df['name_author'] == "", 'name_author'] = None
                 response = {"status": {"code": 200, "message": "Success"},
-                            "info": {"total": len_total, "limit": limit, "offset": offset}, "data": current_df.to_dict('records')}
+                            "info": {"total": len_total, "limit": limit, "offset": offset}, "data": df.to_dict('records')}
         except Exception as er:
             print(er)
             response = {"status": {"code": 500, "message": "Unexpected Error"}}
