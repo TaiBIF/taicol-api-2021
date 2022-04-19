@@ -67,15 +67,14 @@ class ReferencesView(APIView):
             response = {"status": {"code": 400, "message": "Bad Request: Unsupported parameters"}}
             return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
         try:
-            data = []  # 如果沒有輸入name_id, 不回傳資料
-            len_total = 0
+            df = pd.DataFrame(columns=['reference_id', 'citation', 'status', 'indications', 'is_taiwan', 'is_endemic', 'alien_type'])
             if name_id := request.GET.get('name_id'):
                 query = f"SELECT ru.reference_id, CONCAT(c.author, ' ' ,c.content), ru.status, ru.properties->>'$.indications', \
                          JSON_EXTRACT(ru.properties, '$.is_taiwan'), JSON_EXTRACT(ru.properties, '$.is_endemic'), ru.properties->>'$.alien_type' \
                          FROM reference_usages ru \
                          JOIN `references` r ON ru.reference_id = r.id \
-                         JOIN api_citations c ON ru.reference_id = c.reference_id    \
-                         WHERE ru.taxon_name_id = {name_id} and r.id != 153"  # 不給TaiCOL backbone
+                         JOIN api_citations c ON ru.reference_id = c.reference_id \
+                         WHERE ru.taxon_name_id = {name_id} and r.id != 153 and ru.status != ''"  # 不給TaiCOL backbone
                 conn = pymysql.connect(**db_settings)
                 with conn.cursor() as cursor:
                     cursor.execute(query)
@@ -89,12 +88,20 @@ class ReferencesView(APIView):
                                 df.loc[i, 'indications'] = ','.join(eval(row.indications))
                             else:
                                 df.loc[i, 'indications'] = None
-                        df = df[['reference_id', 'citation', 'status', 'indications', 'is_taiwan', 'is_endemic', 'alien_type']]
-                        len_total = len(df)
-                        data = df.to_dict('records')
-
+                # 加上原始文獻
+                query = f"SELECT c.reference_id, CONCAT(c.author, ' ' ,c.content) \
+                        FROM taxon_names tn \
+                        JOIN api_citations c ON tn.reference_id = c.reference_id    \
+                        WHERE tn.id = {name_id} AND tn.reference_id IS NOT NULL "
+                with conn.cursor() as cursor:
+                    cursor.execute(query)
+                    results = cursor.fetchall()
+                    for r in results:
+                        if r[0] not in df.reference_id.to_list():
+                            df = df.append({'reference_id': r[0], 'citation': r[1], 'status': None,
+                                            'indications': None, 'is_taiwan': None, 'is_endemic': None, 'alien_type': None}, ignore_index=True)
             response = {"status": {"code": 200, "message": "Success"},
-                        "info": {"total": len_total}, "data": data}
+                        "info": {"total": len(df)}, "data": df.to_dict('records')}
         except Exception as er:
             print(er)
             response = {"status": {"code": 500, "message": "Unexpected Error"}}
