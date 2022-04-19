@@ -70,29 +70,25 @@ class ReferencesView(APIView):
             data = []  # 如果沒有輸入name_id, 不回傳資料
             len_total = 0
             if name_id := request.GET.get('name_id'):
-                query = f"SELECT ru.reference_id, r.title, r.subtitle, ru.status, ru.properties->>'$.indications', \
+                query = f"SELECT ru.reference_id, CONCAT(c.author, ' ' ,c.content), ru.status, ru.properties->>'$.indications', \
                          JSON_EXTRACT(ru.properties, '$.is_taiwan'), JSON_EXTRACT(ru.properties, '$.is_endemic'), ru.properties->>'$.alien_type' \
                          FROM reference_usages ru \
                          JOIN `references` r ON ru.reference_id = r.id \
+                         JOIN api_citations c ON ru.reference_id = c.reference_id    \
                          WHERE ru.taxon_name_id = {name_id} and r.id != 153"  # 不給TaiCOL backbone
                 conn = pymysql.connect(**db_settings)
                 with conn.cursor() as cursor:
                     cursor.execute(query)
-                    df = pd.DataFrame(cursor.fetchall(), columns=['reference_id', 'title', 'subtitle', 'status', 'indications', 'is_taiwan', 'is_endemic', 'alien_type'])
+                    df = pd.DataFrame(cursor.fetchall(), columns=['reference_id', 'citation', 'status', 'indications', 'is_taiwan', 'is_endemic', 'alien_type'])
                     if len(df):
                         is_list = ['is_endemic', 'is_taiwan']
                         df[is_list] = df[is_list].replace({0: False, 1: True})
-                        df['citation'] = ''
                         for i in df.index:
                             row = df.iloc[i]
                             if row.indications and row.indications != '[]':
                                 df.loc[i, 'indications'] = ','.join(eval(row.indications))
                             else:
                                 df.loc[i, 'indications'] = None
-                            subtitle_split = row.subtitle.split(', ')
-                            author = ', '.join(subtitle_split[0:2]) + '.'
-                            source = ', '.join(subtitle_split[2:])
-                            df.loc[i, 'citation'] = f"{author} {row.title}. {source}."
                         df = df[['reference_id', 'citation', 'status', 'indications', 'is_taiwan', 'is_endemic', 'alien_type']]
                         len_total = len(df)
                         data = df.to_dict('records')
@@ -473,15 +469,16 @@ class NameView(APIView):
                             tn.original_taxon_name_id, tn.note, tn.created_at, tn.updated_at, \
                             n.name, \
                             JSON_EXTRACT(tn.properties,'$.is_hybrid_formula'), \
-                            tn.properties ->> '$.reference_name', \
+                            CONCAT(c.author, ' ', c.content), \
                             tn.properties ->> '$.type_name', \
                             tn.properties ->> '$.latin_genus', \
                             tn.properties ->> '$.latin_s1',\
                             tn.properties ->> '$.species_layers',\
                             an.name_with_tag \
                             FROM taxon_names AS tn \
-                            JOIN nomenclatures AS n ON tn.nomenclature_id = n.id \
-                            JOIN api_names as an ON tn.id = an.taxon_name_id"
+                            JOIN nomenclatures n ON tn.nomenclature_id = n.id \
+                            JOIN api_names an ON tn.id = an.taxon_name_id \
+                            LEFT JOIN api_citations c ON tn.reference_id = c.reference_id"
             count_query = "SELECT COUNT(*) FROM taxon_names tn"
 
             conditions = []
@@ -620,7 +617,6 @@ class NameView(APIView):
 
                 df['is_hybrid'] = df['is_hybrid'].replace('false', False).replace('true', True)
 
-                df.loc[df['protologue'] == "null", 'protologue'] = None
                 df.loc[df['name_author'] == "", 'name_author'] = None
                 response = {"status": {"code": 200, "message": "Success"},
                             "info": {"total": len_total, "limit": limit, "offset": offset}, "data": df.to_dict('records')}
