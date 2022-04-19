@@ -1,5 +1,6 @@
 # generate taxonID for the first time
 
+import re
 import itertools
 from importlib.abc import TraversableResources
 from sys import dllhandle
@@ -521,3 +522,118 @@ for r in results:
 # TODO 如果未來原本是種下的上階層是有效的種，但改為無效，要怎麼更新？
 
 # TODO 這樣存資料表會不會太大？
+
+
+# references
+
+# 產生引用內的作者格式
+
+def to_firstname_abbr(string):
+    s_list = re.split(r'[\s|\-]', string)
+    for i in range(len(s_list)):
+        if len(s_list[i]) == 1 or re.match(r"(\w[\.]).*", s_list[i]):  # 本身只有一個字母或本身是縮寫
+            c = s_list[i]
+        else:
+            c = re.sub(r"(\w).*", r'\1.', s_list[i])
+        if i == 0:
+            full_abbr = c
+        else:
+            full_abbr += '-' + c
+    return full_abbr
+
+
+def to_middlename_abbr(content):
+    if re.match(r"(\w[\.]).*", content):  # 本身是縮寫
+        return re.sub(r"(\w[\.]).*", r"\1", content)
+    elif len(content) == 1:  # 本身只有一個字
+        return content
+    else:
+        return re.sub(r"(\w).*", r"\1.", content)
+
+
+query = "SELECT p.last_name, p.first_name, p.middle_name, pr.reference_id, pr.order, r.publish_year \
+         FROM person_reference pr \
+         JOIN persons p ON pr.person_id = p.id \
+         JOIN `references` r on pr.reference_id = r.id "
+conn = pymysql.connect(**db_settings)
+with conn.cursor() as cursor:
+    cursor.execute(query)
+    results = pd.DataFrame(cursor.fetchall(), columns=['last_name', 'first_name', 'middle_name', 'reference_id', 'order', 'year'])
+
+
+# author
+
+citation_df = []
+for g in results.reference_id.unique():
+    rows = results[results['reference_id'] == g].sort_values('order')
+    author_list = []
+    for i, r in rows.iterrows():
+        last_name = r['last_name']
+        first_name = to_firstname_abbr(r['first_name'])
+        middle_name = to_middlename_abbr(r['middle_name'])
+        full_name = f"{last_name}, {middle_name}{first_name}"
+        author_list.append(full_name)
+    if len(author_list) == 1:
+        authors = author_list[0]
+    elif len(author_list) == 2:
+        authors = ', '.join(author_list)
+    else:  # 三人或以上
+        authors = ', '.join(author_list[:-1]) + ' & ' + author_list[-1]
+    citation_df.append((g, authors + f' ({rows.year.unique()[0]})'))
+
+
+conn = pymysql.connect(**db_settings)
+for c in citation_df:
+    with conn.cursor() as cursor:
+        query = "INSERT INTO api_citations (reference_id, author) VALUES (%s, %s)"
+        cursor.execute(query, (c))
+        conn.commit()
+
+
+# content
+
+query = "SELECT id, type, title, properties FROM `references`"
+conn = pymysql.connect(**db_settings)
+with conn.cursor() as cursor:
+    cursor.execute(query)
+    results = pd.DataFrame(cursor.fetchall(), columns=['id', 'type', 'title', 'properties'])
+
+citation_df = []
+for i in results.index:
+    row = results.iloc[i]
+    prop = json.loads(row.properties)
+    # 書籍
+    if row.type == 3:
+        content = row.title
+        if content[-1] != '.':
+            content += '.'
+    # 名錄
+    elif row.type == 4:
+        content = row.title
+    # 期刊文章
+    elif row.type == 1:
+        content = f"{prop.get('article_title')}. <i>{prop.get('book_title')}</i> {prop.get('volume')}"
+        if prop.get('issue'):
+            content += f"({prop.get('issue')})"
+        content += f": {prop.get('pages_range')}."
+    # 書籍篇章
+    elif row.type == 2:
+        content = f"{prop.get('article_title')}. In: {prop.get('book_title')},"
+        if prop.get('edition'):
+            content += f" {prop.get('edition')} ed.,"
+        if prop.get('volume'):
+            content += f" vol. {prop.get('volume')}."
+        elif prop.get('chapter'):
+            content += f" ch. {prop.get('chapter')}."
+        content += f" {prop.get('pages_range')}."
+    citation_df.append((content, row.id))
+
+conn = pymysql.connect(**db_settings)
+for c in citation_df:
+    with conn.cursor() as cursor:
+        query = "UPDATE api_citations SET content = %s WHERE reference_id = %s"
+        cursor.execute(query, (c))
+        conn.commit()
+
+
+# TODO API的時候要把<i></i>拿掉
