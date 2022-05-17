@@ -23,6 +23,7 @@ from rest_framework.schemas import AutoSchema
 
 from .utils import rank_map_c, rank_map
 
+import requests
 
 db_settings = {
     "host": env('DB_HOST'),
@@ -32,6 +33,7 @@ db_settings = {
     "db": env('DB_DBNAME'),
 }
 
+match_url = env('NOMENMATCH_URL')
 
 def validate(date_text):
     try:
@@ -46,6 +48,72 @@ class DateTimeEncoder(JSONEncoder):
     def default(self, obj):
         if isinstance(obj, (datetime.date, datetime.datetime)):
             return obj.isoformat()
+
+
+class NameMatchView(APIView):
+    @swagger_auto_schema(
+        operation_summary='取得學名比對',
+        # operation_description='我是 GET 的說明',
+        manual_parameters=[
+            openapi.Parameter(
+                name='name_id',
+                in_=openapi.IN_QUERY,
+                description='學名ID',
+                type=openapi.TYPE_STRING
+            ),
+            openapi.Parameter(
+                name='name',
+                in_=openapi.IN_QUERY,
+                description='名字',
+                type=openapi.TYPE_STRING
+            ),
+
+        ]
+    )
+    def get(self, request, *args, **krgs):
+
+        if request.GET.keys() and not set(list(request.GET.keys())) <= set(['name_id', 'name']):
+            response = {"status": {"code": 400, "message": "Bad Request: Unsupported parameters"}}
+            return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
+        try:
+            namecode_list = []
+            conn = pymysql.connect(**db_settings)            
+            df = pd.DataFrame(columns=['taxon_id', 'usage_status', 'reference_id', 'reference_year'])
+            if name_id := request.GET.get('name_id'):
+                namecode_list = [name_id]
+            elif name := request.GET.get('name'): # 如果是查name, 接NomenMatchAPI
+                namecode_list = []
+                url = f"{match_url}?names={name}&best=yes&format=json&source=taicol"
+                result = requests.get(url)
+                if result.status_code == 200:
+                    result = result.json()
+                    for d in result['data']:
+                        for r in d['results']:
+                            namecode_list.append(r.get('namecode'))
+            if namecode_list:
+                with conn.cursor() as cursor:
+                    query = f"SELECT atu.taxon_id, atu.status, atu.reference_id, r.publish_year \
+                        FROM api_taxon_usages atu \
+                        LEFT JOIN `references` r ON atu.reference_id = r.id \
+                        WHERE atu.taxon_name_id IN ({','.join(namecode_list)}) and atu.is_latest = 1"  
+                    # print(','.join(namecode_list))
+                    cursor.execute(query)
+                    # cursor.execute(query)
+                    df = pd.DataFrame(cursor.fetchall(), columns=['taxon_id', 'usage_status', 'reference_id', 'reference_year'])
+                    if len(df):
+                        # 如果reference_id是153, 則以空值取代
+                        df.loc[df['reference_id']==153, 'reference_year'] = None
+                        df['reference_id'] = df['reference_id'].replace({153:None})
+                        df['usage_status'] = df['usage_status'].replace({'accepted': 'Accepted', 'misapplied': 'Misapplied', 'synonyms': 'Not accepted'})
+            response = {"status": {"code": 200, "message": "Success"},
+                        "info": {"total": len(df)}, "data": df.to_dict('records')}
+            # return HttpResponse(json.dumps(response, ensure_ascii=False, cls=DateTimeEncoder), content_type="application/json,charset=utf-8")
+
+        except Exception as er:
+            print(er)
+            response = {"status": {"code": 500, "message": "Unexpected Error"}}
+
+        return HttpResponse(json.dumps(response, ensure_ascii=False, cls=DateTimeEncoder), content_type="application/json,charset=utf-8")
 
 
 class ReferencesView(APIView):
