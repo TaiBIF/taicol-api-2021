@@ -92,14 +92,17 @@ class NameMatchView(APIView):
                             namecode_list.append(r.get('namecode'))
             if namecode_list:
                 with conn.cursor() as cursor:
-                    query = f"SELECT atu.taxon_id, atu.status, atu.reference_id, r.publish_year \
+                    query = f"SELECT t.name, t1.name, atu.taxon_id, atu.status, atu.reference_id, r.publish_year  \
                         FROM api_taxon_usages atu \
                         LEFT JOIN `references` r ON atu.reference_id = r.id \
+                        JOIN api_taxon at ON atu.taxon_id = at.taxon_id  \
+                        JOIN taxon_names t ON atu.taxon_name_id = t.id  \
+                        JOIN taxon_names t1 ON at.accepted_taxon_name_id = t1.id  \
                         WHERE atu.taxon_name_id IN ({','.join(namecode_list)}) and atu.is_latest = 1"  
                     # print(','.join(namecode_list))
                     cursor.execute(query)
                     # cursor.execute(query)
-                    df = pd.DataFrame(cursor.fetchall(), columns=['taxon_id', 'usage_status', 'reference_id', 'reference_year'])
+                    df = pd.DataFrame(cursor.fetchall(), columns=['matched_name', 'accepted_name', 'taxon_id', 'usage_status', 'reference_id', 'reference_year' ])
                     if len(df):
                         # 如果reference_id是153, 則以空值取代
                         df.loc[df['reference_id']==153, 'reference_year'] = None
