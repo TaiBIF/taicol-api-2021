@@ -360,10 +360,11 @@ class TaxonView(APIView):
             conn = pymysql.connect(**db_settings)
             query = "SELECT t.taxon_id, t.rank_id, t.accepted_taxon_name_id, t.common_name_c, t.alternative_name_c, \
                             t.is_hybrid, t.is_endemic, t.alien_type, t.is_fossil, t.is_terrestrial, \
-                            t.is_freshwater, t.is_brackish, t.is_marine, t.cites, t.iucn, t.redlist, t.protected, t.sensitive, \
+                            t.is_freshwater, t.is_brackish, t.is_marine, ac.cites_listing, ac.iucn_category, ac.red_category, ac.protected_category, ac.sensitive_suggest, \
                             t.created_at, t.updated_at, tn.name, tn.formatted_authors, an.name_with_tag FROM api_taxon t \
                             JOIN taxon_names tn ON t.accepted_taxon_name_id = tn.id \
-                            JOIN api_names an ON t.accepted_taxon_name_id = an.taxon_name_id"
+                            JOIN api_names an ON t.accepted_taxon_name_id = an.taxon_name_id \
+                            LEFT JOIN api_conservation ac ON t.taxon_id = ac.taxon_id"
             count_query = "SELECT COUNT(*) FROM api_taxon t"
 
             if taxon_id:  # 不考慮其他條件
