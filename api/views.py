@@ -709,6 +709,8 @@ class NameView(APIView):
                         df.loc[n, 'original_name_id'] = int(df.original_name_id[n])
                     if df.type_name_id[n]:
                         df.loc[n, 'type_name_id'] = int(df.type_name_id[n])
+                    else:
+                        df.loc[n, 'type_name_id'] = None
 
 
                 # subset & rename columns
