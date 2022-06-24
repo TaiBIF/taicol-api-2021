@@ -705,6 +705,9 @@ class NameView(APIView):
                             count += 1
                     name = {k: v for k, v in name.items() if v and v != 'null'}
                     df.loc[n, 'name'] = [name]
+                    if df.original_name_id[n]:
+                        df.loc[n, 'original_name_id'] = int(df.original_name_id[n])
+
 
                 # subset & rename columns
                 df = df[['name_id', 'nomenclature_name', 'rank', 'simple_name', 'name_author', 'formatted_name', 'name', 'original_name_id',
