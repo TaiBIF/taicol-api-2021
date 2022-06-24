@@ -665,15 +665,15 @@ class NameView(APIView):
                 df.loc[df['rank'] < 34, 'name'] = '{}'
                 df.loc[df['rank'] < 34, 'original_name_id'] = None
                 df['rank'] = df['rank'].apply(lambda x: rank_map[x])
-                df['type_name'] = None
-                for t in df.type_name_id:
-                    if t:
-                        query_type_name = f"SELECT name FROM taxon_names WHERE id = {t}"
-                        with conn.cursor() as cursor:
-                            cursor.execute(query_type_name)
-                            type_name_result = cursor.fetchone()
-                        if type_name_result:
-                            df.loc[df.type_name_id == t, 'type_name'] = type_name_result[0]
+                # df['type_name'] = None
+                # for t in df.type_name_id:
+                #     if t:
+                #         query_type_name = f"SELECT name FROM taxon_names WHERE id = {t}"
+                #         with conn.cursor() as cursor:
+                #             cursor.execute(query_type_name)
+                #             type_name_result = cursor.fetchone()
+                #         if type_name_result:
+                #             df.loc[df.type_name_id == t, 'type_name'] = type_name_result[0]
                 # find hybrid_parent
                 df['hybrid_parent'] = None
                 for h in df[['is_hybrid', 'name_id']].index:
@@ -707,11 +707,13 @@ class NameView(APIView):
                     df.loc[n, 'name'] = [name]
                     if df.original_name_id[n]:
                         df.loc[n, 'original_name_id'] = int(df.original_name_id[n])
+                    if df.type_name_id[n]:
+                        df.loc[n, 'type_name_id'] = int(df.type_name_id[n])
 
 
                 # subset & rename columns
                 df = df[['name_id', 'nomenclature_name', 'rank', 'simple_name', 'name_author', 'formatted_name', 'name', 'original_name_id',
-                         'is_hybrid', 'hybrid_parent', 'protologue', 'type_name', 'created_at', 'updated_at']]
+                         'is_hybrid', 'hybrid_parent', 'protologue', 'type_name_id', 'created_at', 'updated_at']]
 
                 df['is_hybrid'] = df['is_hybrid'].replace('false', False).replace('true', True)
 
