@@ -42,7 +42,6 @@ def validate(date_text):
     except ValueError:
         return False
 
-
 class DateTimeEncoder(JSONEncoder):
     # Override the default method
     def default(self, obj):
@@ -92,9 +91,10 @@ class NameMatchView(APIView):
                             namecode_list.append(r.get('namecode'))
             if namecode_list:
                 with conn.cursor() as cursor:
-                    query = f"SELECT t.name, t1.name, atu.taxon_id, atu.status, atu.reference_id, r.publish_year  \
+                    query = f"SELECT t.name, t1.name, atu.taxon_id, atu.status, ru.reference_id, r.publish_year  \
                         FROM api_taxon_usages atu \
-                        LEFT JOIN `references` r ON atu.reference_id = r.id \
+                        JOIN reference_usages ru ON atu.reference_usage_id = ru.id \
+                        JOIN `references` r ON ru.reference_id = r.id \
                         JOIN api_taxon at ON atu.taxon_id = at.taxon_id  \
                         JOIN taxon_names t ON atu.taxon_name_id = t.id  \
                         JOIN taxon_names t1 ON at.accepted_taxon_name_id = t1.id  \
@@ -103,6 +103,7 @@ class NameMatchView(APIView):
                     cursor.execute(query)
                     # cursor.execute(query)
                     df = pd.DataFrame(cursor.fetchall(), columns=['matched_name', 'accepted_name', 'taxon_id', 'usage_status', 'reference_id', 'reference_year' ])
+                    df = df.replace({np.nan: None})
                     if len(df):
                         # 如果reference_id是153, 則以空值取代
                         df.loc[df['reference_id']==153, 'reference_year'] = None
@@ -111,7 +112,6 @@ class NameMatchView(APIView):
             response = {"status": {"code": 200, "message": "Success"},
                         "info": {"total": len(df)}, "data": df.to_dict('records')}
             # return HttpResponse(json.dumps(response, ensure_ascii=False, cls=DateTimeEncoder), content_type="application/json,charset=utf-8")
-
         except Exception as er:
             print(er)
             response = {"status": {"code": 500, "message": "Unexpected Error"}}
@@ -133,7 +133,6 @@ class ReferencesView(APIView):
         ]
     )
     def get(self, request, *args, **krgs):
-
         if request.GET.keys() and not set(list(request.GET.keys())) <= set(['name_id']):
             response = {"status": {"code": 400, "message": "Bad Request: Unsupported parameters"}}
             return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
@@ -150,9 +149,10 @@ class ReferencesView(APIView):
                 with conn.cursor() as cursor:
                     cursor.execute(query)
                     df = pd.DataFrame(cursor.fetchall(), columns=['reference_id', 'citation', 'status', 'indications', 'is_taiwan', 'is_endemic', 'alien_type'])
+                    df = df.replace({np.nan: None})
                     if len(df):
                         is_list = ['is_endemic', 'is_taiwan']
-                        df[is_list] = df[is_list].replace({0: False, 1: True})
+                        df[is_list] = df[is_list].replace({0: False, 1: True, '0': False, '1': True})
                         for i in df.index:
                             row = df.iloc[i]
                             if row.indications and row.indications != '[]':
@@ -201,30 +201,34 @@ class HigherTaxaView(APIView):
         ]
     )
     def get(self, request, *args, **krgs):
-
         if request.GET.keys() and not set(list(request.GET.keys())) <= set(['taxon_id']):
             response = {"status": {"code": 400, "message": "Bad Request: Unsupported parameters"}}
             return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
-
         try:
             data = []  # 如果沒有輸入taxon_id, 不回傳資料
             if taxon_id := request.GET.get('taxon_id'):
-                # 取得child_taxon_id = taxon_id的所有資料，但不包含自己
-                query = f"SELECT distinct(th.parent_taxon_id), t.accepted_taxon_name_id, tn.name, \
-                        tn.formatted_authors, an.name_with_tag, t.rank_id, t.common_name_c \
-                        FROM api_taxon_hierarchy th \
-                        JOIN api_taxon t ON th.parent_taxon_id = t.taxon_id \
-                        JOIN taxon_names tn ON t.accepted_taxon_name_id = tn.id \
-                        JOIN api_names an ON t.accepted_taxon_name_id = an.taxon_name_id \
-                        WHERE th.parent_taxon_id != '{taxon_id}' and th.child_taxon_id = '{taxon_id}' \
-                        ORDER BY t.rank_id DESC"
+                # 分成兩階段 先抓回path，再去抓name
                 conn = pymysql.connect(**db_settings)
+                query = f"SELECT path FROM api_taxon_tree WHERE taxon_id = '{taxon_id}'"
+                path = ''
                 with conn.cursor() as cursor:
                     cursor.execute(query)
-                    results = cursor.fetchall()
-                    for r in results:
-                        data += [{'taxon_id': r[0], 'name_id': r[1], 'simple_name': r[2], 'name_author': r[3], 'formatted_name': r[4],
-                                  'rank': rank_map[r[5]], 'common_name_c': r[6]}]
+                    path = cursor.fetchone()
+                if path:
+                    path = path[0].split('>')              
+                    query = f"SELECT t.taxon_id, t.accepted_taxon_name_id, tn.name, \
+                            tn.formatted_authors, an.name_with_tag, t.rank_id, t.common_name_c \
+                            FROM api_taxon t \
+                            JOIN taxon_names tn ON t.accepted_taxon_name_id = tn.id \
+                            JOIN api_names an ON t.accepted_taxon_name_id = an.taxon_name_id \
+                            WHERE t.taxon_id IN ({str(path).replace('[','').replace(']','')}) \
+                            ORDER BY t.rank_id DESC"
+                    with conn.cursor() as cursor:
+                        cursor.execute(query)
+                        results = cursor.fetchall()
+                        for r in results:
+                            data += [{'taxon_id': r[0], 'name_id': r[1], 'simple_name': r[2], 'name_author': r[3], 'formatted_name': r[4],
+                                    'rank': rank_map[r[5]], 'common_name_c': r[6]}]
             response = {"status": {"code": 200, "message": "Success"},
                         "data": data}
         except Exception as er:
@@ -378,7 +382,7 @@ class TaxonView(APIView):
                         conditions += [f"t.{i} = 1"]
                     elif var == 'false':
                         conditions += [f"{i} = 0"]
-                if var := request.GET.get('t.alien_type', '').strip():
+                if var := request.GET.get('alien_type', '').strip():
                     conditions += [f"t.alien_type = '{var}'"]
                 if updated_at:
                     if not validate(updated_at):
@@ -392,21 +396,32 @@ class TaxonView(APIView):
                     conditions += [f"date(t.created_at) > '{created_at}'"]
                 if taxon_group:
                     # 先抓taxon_id再判斷有沒有其他condition要考慮
-                    query_1 = f"SELECT th.child_taxon_id FROM taxon_names tn \
-                        JOIN api_taxon_usages tu ON tn.id = tu.taxon_name_id \
-                        JOIN api_taxon t ON tu.taxon_id = t.taxon_id \
-                        JOIN api_taxon_hierarchy th ON tu.taxon_id = th.parent_taxon_id \
-                        WHERE tn.name = '{taxon_group}' OR t.common_name_c = '{taxon_group}' OR find_in_set('{taxon_group}',t.alternative_name_c) "
+                    query_1 = f"SELECT t.taxon_id FROM taxon_names tn \
+                                JOIN api_taxon t ON tn.id = t.accepted_taxon_name_id \
+                                WHERE tn.name = '{taxon_group}' OR t.common_name_c = '{taxon_group}' OR find_in_set('{taxon_group}',t.alternative_name_c) "
                     with conn.cursor() as cursor:
                         cursor.execute(query_1)
-                        results = cursor.fetchall()
-                        if results:
-                            results = str([i[0] for i in results]).replace('[', '(').replace(']', ')')
-                            conditions += [f"t.taxon_id IN {results}"]
-                        else:  # 如果沒有結果的話用回傳空值
-                            response = {"status": {"code": 200, "message": "Success"},
-                                        "info": {"total": 0, "limit": limit, "offset": offset}, "data": []}
-                            return HttpResponse(json.dumps(response, ensure_ascii=False, cls=DateTimeEncoder), content_type="application/json,charset=utf-8")
+                        t_id = cursor.fetchall()               
+                        # 可能不只一筆
+                        query_2 = "SELECT taxon_id FROM api_taxon_tree WHERE"
+                        t_count = 0
+                        for t in t_id:
+                            t_count += 1
+                            if t_count == 1:
+                                query_2 += f" path like '%>{t[0]}%' or taxon_id = '{t[0]}'"
+                            else:
+                                query_2 += f" or path like '%>{t[0]}%' or taxon_id = '{t[0]}'"
+                        if t_count > 0:
+                            with conn.cursor() as cursor:
+                                cursor.execute(query_2)
+                                results = cursor.fetchall()
+                                if results:
+                                    results = str([i[0] for i in results]).replace('[', '(').replace(']', ')')
+                                    conditions += [f"t.taxon_id IN {results}"]
+                                else:  # 如果沒有結果的話用回傳空值
+                                    response = {"status": {"code": 200, "message": "Success"},
+                                                "info": {"total": 0, "limit": limit, "offset": offset}, "data": []}
+                                    return HttpResponse(json.dumps(response, ensure_ascii=False, cls=DateTimeEncoder), content_type="application/json,charset=utf-8")
 
                 for l in range(len(conditions)):
                     if l == 0:
@@ -427,8 +442,9 @@ class TaxonView(APIView):
                                                               'created_at', 'updated_at', 'simple_name', 'name_author', 'formatted_name'])
                 # 0, 1 要轉成true, false (但可能會有null)
                 if len(df):
+                    df = df.replace({np.nan: None})
                     is_list = ['is_hybrid', 'is_endemic', 'is_fossil', 'is_terrestrial', 'is_freshwater', 'is_brackish', 'is_marine']
-                    df[is_list] = df[is_list].replace({0: False, 1: True})
+                    df[is_list] = df[is_list].replace({0: False, 1: True, '0': False, '1': True})
                     # 階層
                     df['rank'] = df['rank'].apply(lambda x: rank_map[x])
                     # 日期格式 yy-mm-dd
@@ -439,7 +455,7 @@ class TaxonView(APIView):
                     df['formatted_synonyms'] = ''
                     df['misapplied'] = ''
                     df['formatted_misapplied'] = ''
-                    query = f"SELECT tu.taxon_id, tu.status, GROUP_CONCAT(an.name_with_tag SEPARATOR ','), GROUP_CONCAT(tn.name SEPARATOR ',') \
+                    query = f"SELECT tu.taxon_id, tu.status, GROUP_CONCAT(DISTINCT(an.name_with_tag) SEPARATOR ','), GROUP_CONCAT(DISTINCT(tn.name) SEPARATOR ',') \
                                 FROM api_taxon_usages tu \
                                 JOIN api_names an ON tu.taxon_name_id = an.taxon_name_id \
                                 JOIN taxon_names tn ON tu.taxon_name_id = tn.id \
