@@ -109,13 +109,14 @@ class NameMatchView(APIView):
                         JOIN api_taxon at ON atu.taxon_id = at.taxon_id  \
                         JOIN taxon_names t ON atu.taxon_name_id = t.id  \
                         JOIN taxon_names t1 ON at.accepted_taxon_name_id = t1.id  \
-                        WHERE atu.taxon_name_id IN ({','.join(namecode_list)}) and atu.is_latest = 1"  
+                        WHERE atu.taxon_name_id IN ({','.join(namecode_list)})"  
                     # print(','.join(namecode_list))
                     cursor.execute(query)
                     # cursor.execute(query)
                     df = pd.DataFrame(cursor.fetchall(), columns=['matched_name', 'accepted_name', 'taxon_id', 'usage_status'])
                     df = df.replace({np.nan: None})
                     if len(df):
+                        df = df.drop_duplicates()
                         # 如果reference_id是153, 則以空值取代
                         # df.loc[df['reference_id']==153, 'reference_year'] = None
                         # df['reference_id'] = df['reference_id'].replace({153:None})
