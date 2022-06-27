@@ -66,23 +66,36 @@ class NameMatchView(APIView):
                 description='名字',
                 type=openapi.TYPE_STRING
             ),
-
+            openapi.Parameter(
+                name='best',
+                in_=openapi.IN_QUERY,
+                description='是否只取最佳結果',
+                type=openapi.TYPE_STRING
+            ),
         ]
     )
     def get(self, request, *args, **krgs):
 
-        if request.GET.keys() and not set(list(request.GET.keys())) <= set(['name_id', 'name']):
+        if request.GET.keys() and not set(list(request.GET.keys())) <= set(['name_id', 'name', 'best']):
             response = {"status": {"code": 400, "message": "Bad Request: Unsupported parameters"}}
             return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
         try:
             namecode_list = []
             conn = pymysql.connect(**db_settings)            
-            df = pd.DataFrame(columns=['taxon_id', 'usage_status', 'reference_id', 'reference_year'])
+            df = pd.DataFrame(columns=['taxon_id', 'usage_status'])
             if name_id := request.GET.get('name_id'):
                 namecode_list = [name_id]
             elif name := request.GET.get('name'): # 如果是查name, 接NomenMatchAPI
+                best = request.GET.get('best')
+                if best and not best in ['yes', 'no']:
+                    response = {"status": {"code": 400, "message": "Bad Request: Unsupported parameter value"}}
+                    return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
+                elif not best:
+                    best = 'yes'
+                else:
+                    best = request.GET.get('best')
                 namecode_list = []
-                url = f"{match_url}?names={name}&best=yes&format=json&source=taicol"
+                url = f"{match_url}?names={name}&best={best}&format=json&source=taicol"
                 result = requests.get(url)
                 if result.status_code == 200:
                     result = result.json()
@@ -91,10 +104,8 @@ class NameMatchView(APIView):
                             namecode_list.append(r.get('namecode'))
             if namecode_list:
                 with conn.cursor() as cursor:
-                    query = f"SELECT t.name, t1.name, atu.taxon_id, atu.status, ru.reference_id, r.publish_year  \
+                    query = f"SELECT t.name, t1.name, atu.taxon_id, atu.status \
                         FROM api_taxon_usages atu \
-                        JOIN reference_usages ru ON atu.reference_usage_id = ru.id \
-                        JOIN `references` r ON ru.reference_id = r.id \
                         JOIN api_taxon at ON atu.taxon_id = at.taxon_id  \
                         JOIN taxon_names t ON atu.taxon_name_id = t.id  \
                         JOIN taxon_names t1 ON at.accepted_taxon_name_id = t1.id  \
@@ -102,12 +113,12 @@ class NameMatchView(APIView):
                     # print(','.join(namecode_list))
                     cursor.execute(query)
                     # cursor.execute(query)
-                    df = pd.DataFrame(cursor.fetchall(), columns=['matched_name', 'accepted_name', 'taxon_id', 'usage_status', 'reference_id', 'reference_year' ])
+                    df = pd.DataFrame(cursor.fetchall(), columns=['matched_name', 'accepted_name', 'taxon_id', 'usage_status'])
                     df = df.replace({np.nan: None})
                     if len(df):
                         # 如果reference_id是153, 則以空值取代
-                        df.loc[df['reference_id']==153, 'reference_year'] = None
-                        df['reference_id'] = df['reference_id'].replace({153:None})
+                        # df.loc[df['reference_id']==153, 'reference_year'] = None
+                        # df['reference_id'] = df['reference_id'].replace({153:None})
                         df['usage_status'] = df['usage_status'].replace({'accepted': 'Accepted', 'misapplied': 'Misapplied', 'synonyms': 'Not accepted'})
             response = {"status": {"code": 200, "message": "Success"},
                         "info": {"total": len(df)}, "data": df.to_dict('records')}
