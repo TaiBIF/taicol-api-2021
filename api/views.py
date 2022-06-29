@@ -152,7 +152,7 @@ class ReferencesView(APIView):
             df = pd.DataFrame(columns=['reference_id', 'citation', 'status', 'indications', 'is_taiwan', 'is_endemic', 'alien_type'])
             if name_id := request.GET.get('name_id'):
                 query = f"SELECT ru.reference_id, CONCAT(c.author, ' ' ,c.content), ru.status, ru.properties->>'$.indications', \
-                         JSON_EXTRACT(ru.properties, '$.is_taiwan'), JSON_EXTRACT(ru.properties, '$.is_endemic'), ru.properties->>'$.alien_type' \
+                         JSON_EXTRACT(ru.properties, '$.is_in_taiwan'), JSON_EXTRACT(ru.properties, '$.is_endemic'), ru.properties->>'$.alien_type' \
                          FROM reference_usages ru \
                          JOIN `references` r ON ru.reference_id = r.id \
                          JOIN api_citations c ON ru.reference_id = c.reference_id \
