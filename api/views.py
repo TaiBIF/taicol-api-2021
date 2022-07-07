@@ -100,8 +100,9 @@ class NameMatchView(APIView):
                 if result.status_code == 200:
                     result = result.json()
                     for d in result['data']:
-                        for r in d['results']:
-                            namecode_list.append(r.get('namecode'))
+                        for ds in d:
+                            for r in ds['results']:
+                                namecode_list.append(r.get('namecode'))
             if namecode_list:
                 with conn.cursor() as cursor:
                     query = f"SELECT t.name, t1.name, atu.taxon_id, atu.status \
