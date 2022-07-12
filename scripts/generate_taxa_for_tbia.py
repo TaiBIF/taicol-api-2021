@@ -53,37 +53,39 @@ for o in other_names:
 # 取所有階層
 # 階層不存作者
 
+
 for i in df.index:
     if i % 1000==0:
         print(i)
-    conn = pymysql.connect(**db_settings)
-    if df.path[i]:
-        path = df.path[i].split('>')
-        taxon_id = df.taxon_id[i]
-        # 先拿掉自己
-        path = [p for p in path if p != taxon_id]
-        if path:
-            query = f"SELECT t.taxon_id, t.accepted_taxon_name_id, tn.name, \
-                    tn.formatted_authors, an.name_with_tag, t.rank_id, t.common_name_c \
-                    FROM api_taxon t \
-                    JOIN taxon_names tn ON t.accepted_taxon_name_id = tn.id \
-                    JOIN api_names an ON t.accepted_taxon_name_id = an.taxon_name_id \
-                    WHERE t.taxon_id IN ({str(path).replace('[','').replace(']','')}) \
-                    ORDER BY t.rank_id DESC"
-            with conn.cursor() as cursor:
-                cursor.execute(query)
-                results = cursor.fetchall()
-                for r in results:
-                    rank_name = rank_map[r[5]].lower().replace(" ", "")
-                    df.loc[i, rank_name] = r[2]
-                    # 屬以下才有斜體格式
-                    if r[5] >=30:
-                        col_name = 'formatted_' + rank_name
-                        df.loc[i, col_name] = r[4]
-                    # 如果有中文加上中文
-                    if r[6]:
-                        rank_name_c = rank_name + '_c'
-                        df.loc[i, rank_name_c] = r[6]
+    if i >= 78019:
+        conn = pymysql.connect(**db_settings)
+        if df.path[i]:
+            path = df.path[i].split('>')
+            taxon_id = df.taxon_id[i]
+            # 先拿掉自己
+            path = [p for p in path if p != taxon_id]
+            if path:
+                query = f"SELECT t.taxon_id, t.accepted_taxon_name_id, tn.name, \
+                        tn.formatted_authors, an.name_with_tag, t.rank_id, t.common_name_c \
+                        FROM api_taxon t \
+                        JOIN taxon_names tn ON t.accepted_taxon_name_id = tn.id \
+                        JOIN api_names an ON t.accepted_taxon_name_id = an.taxon_name_id \
+                        WHERE t.taxon_id IN ({str(path).replace('[','').replace(']','')}) \
+                        ORDER BY t.rank_id DESC"
+                with conn.cursor() as cursor:
+                    cursor.execute(query)
+                    results = cursor.fetchall()
+                    for r in results:
+                        rank_name = rank_map[r[5]].lower().replace(" ", "")
+                        df.loc[i, rank_name] = r[2]
+                        # 屬以下才有斜體格式
+                        if r[5] >=30:
+                            col_name = 'formatted_' + rank_name
+                            df.loc[i, col_name] = r[4]
+                        # 如果有中文加上中文
+                        if r[6]:
+                            rank_name_c = rank_name + '_c'
+                            df.loc[i, rank_name_c] = r[6]
 
 # id 要轉成 int
 # 要把0改成None
@@ -98,42 +100,11 @@ df = df.astype({'accepted_namecode': "int"})
 df['taxon_rank'] = df['taxon_rank'].str.lower()
 
 # 整理columns -> 但無法確定會有什麼欄位...
-# columns = ['namecode','accepted_namecode','scientific_name','name_url_id','accepted_name_url_id','common_name_c','taxon_rank','genus', 'family', 'order', 'class', 'phylum', 'kingdom', 'simple_name']
-# df = df[columns]
-
 # rename
 
 df = df.drop(columns=['path'])
-
-# df.columns = ['id',
-# 'scientificNameID',
-# 'scientificName',
-# 'name_author',
-# 'formatted_name',
-# 'common_name_c',
-# 'alternative_name_c',
-# 'taxonRank',
-# 'synonyms',
-# 'formatted_synonyms',
-# 'misapplied',
-# 'formatted_misapplied',
-# 'kingdom',
-# 'kingdom_c',
-# 'phylum',
-# 'phylum_c',
-# 'class',
-# 'class_c',
-# 'order',
-# 'order_c',
-# 'family',
-# 'family_c',
-# 'genus',
-# 'formatted_genus',
-# 'genus_c',
-# 'species',
-# 'formatted_species',
-# 'species_c',
-# ]
+df = df.rename(columns={'taxon_id': 'id', 'accepted_namecode': 'scientificNameID', 
+                        'taxon_rank': 'taxonRank'})
 
 today = datetime.datetime.now().strftime('%Y%m%d')
 
