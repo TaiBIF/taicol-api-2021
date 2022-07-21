@@ -11,6 +11,35 @@ import json
 import glob
 import numpy as np
 
+source_dict = {'wikispecies':1,
+'discoverlife':2,
+'taibif':3,
+'inat':4,
+'antwiki':5,
+'mycobank':6,
+'worms':7,
+'powo':8,
+'tropicos':9,
+'lpsn':10,
+'ncbi':11,
+'irmng':12,
+'col':13,
+'amphibiansoftheworld':14,
+'adw':15,
+'fishbase_species':16,
+'fishbase_family':17,
+'fishbase_order':18,
+'flow':19,
+'orthoptera':20,
+'taiherbarium':21,
+'nc':22,
+'wsc':23,
+'gisd':24,
+'algaebase_species':25,
+'algaebase_hierarchy':26}
+
+
+
 db_settings = {
     "host": env('DB_HOST'),
     "port": int(env('DB_PORT')),
@@ -68,7 +97,7 @@ def create_citations(id_list):
         if len(author_list) == 1:
             authors = author_list[0]
         elif len(author_list) == 2:
-            authors = ', '.join(author_list)
+            authors = ' & '.join(author_list)
         else:  # 三人或以上
             authors = ', '.join(author_list[:-1]) + ' & ' + author_list[-1]
         citation_df.append((g, authors + f' ({rows.year.unique()[0]})'))
@@ -124,7 +153,6 @@ id_list = [str(r[0]) for r in results]
 # 1-2 修改的文獻
 if id_list:
     citation_df = create_citations(id_list)
-
     conn = pymysql.connect(**db_settings)
     for i in citation_df.index:
         row = citation_df.iloc[i]
@@ -138,59 +166,60 @@ if id_list:
 # 2 api_names
 def create_names(name_list, hybrid_name_list):
     rows = []
-    query = f"SELECT rank_id, nomenclature_id, properties, id FROM taxon_names WHERE id IN ({','.join(name_list)})"
-    conn = pymysql.connect(**db_settings)
-    with conn.cursor() as cursor:
-        cursor.execute(query)
-        results = cursor.fetchall()
-    for r in results:
-        pp = json.loads(r[2])
-        if r[0] < 30:  # rank 為屬以上
-            formatted_name = pp.get('latin_name')
-        elif r[0] == 30:  # rank 為屬
-            if r[1] == 2 and pp.get('is_hybrid_formula'):  # 命名規約為植物且為雜交
-                formatted_name = f"× <i>{pp.get('latin_name')}</i>"
-            else:
-                formatted_name = f"<i>{pp.get('latin_name')}</i>"
-        elif r[0] == 34:  # rank 為種
-            if r[1] == 2 and pp.get('is_hybrid_formula'):  # 命名規約為植物且為雜交
-                formatted_name = f"<i>{pp.get('latin_genus')}</i> × <i>{pp.get('latin_s1')}</i>"
-            else:
-                formatted_name = f"<i>{pp.get('latin_genus')} {pp.get('latin_s1')}</i>"
-        elif r[0] > 34:  # 種下 & 種下下
-            if r[1] == 1:  # 命名規約為動物
-                count = 0
-                for l in pp.get('species_layers'):
-                    if count == 0:  # 種下rank不顯示
-                        # latin genus 可能是空的 & latin s1
-                        if pp.get('latin_genus') and pp.get('latin_s1'):
-                            formatted_name = f"<i>{pp.get('latin_genus')} {pp.get('latin_s1')} {l.get('latin_name')}</i>"
-                        else:
-                            query = f"SELECT properties FROM taxon_names WHERE id = {pp.get('species_id')}"
-                            conn = pymysql.connect(**db_settings)
-                            with conn.cursor() as cursor:
-                                cursor.execute(query)
-                                n = cursor.fetchall()
-                                np = json.loads(n[0][0])
-                                formatted_name = f"<i>{np.get('latin_genus')} {np.get('latin_s1')} {l.get('latin_name')}</i>"
-                    else:  # 種下下rank需顯示
-                        formatted_name += f" {l.get('rank_abbreviation')} <i>{l.get('latin_name')}</i>"
-                    count += 1
-            else:  # 命名規約為植物
-                # latin genus 可能是空的 & latin s1
-                if pp.get('latin_genus') and pp.get('latin_s1'):
-                    formatted_name = f"<i>{pp.get('latin_genus')} {pp.get('latin_s1')}</i>"
+    if name_list:
+        query = f"SELECT rank_id, nomenclature_id, properties, id FROM taxon_names WHERE id IN ({','.join(name_list)})"
+        conn = pymysql.connect(**db_settings)
+        with conn.cursor() as cursor:
+            cursor.execute(query)
+            results = cursor.fetchall()
+        for r in results:
+            pp = json.loads(r[2])
+            if r[0] < 30:  # rank 為屬以上
+                formatted_name = pp.get('latin_name')
+            elif r[0] == 30:  # rank 為屬
+                if r[1] == 2 and pp.get('is_hybrid_formula'):  # 命名規約為植物且為雜交
+                    formatted_name = f"× <i>{pp.get('latin_name')}</i>"
                 else:
-                    query = f"SELECT properties FROM taxon_names WHERE id = {pp.get('species_id')}"
-                    conn = pymysql.connect(**db_settings)
-                    with conn.cursor() as cursor:
-                        cursor.execute(query)
-                        n = cursor.fetchall()
-                        np = json.loads(n[0][0])
-                        formatted_name = f"<i>{np.get('latin_genus')} {np.get('latin_s1')}</i>"
-                for l in pp.get('species_layers'):
-                    formatted_name += f" {l.get('rank_abbreviation')} <i>{l.get('latin_name')}</i>"
-        rows.append([r[3], formatted_name])
+                    formatted_name = f"<i>{pp.get('latin_name')}</i>"
+            elif r[0] == 34:  # rank 為種
+                if r[1] == 2 and pp.get('is_hybrid_formula'):  # 命名規約為植物且為雜交
+                    formatted_name = f"<i>{pp.get('latin_genus')}</i> × <i>{pp.get('latin_s1')}</i>"
+                else:
+                    formatted_name = f"<i>{pp.get('latin_genus')} {pp.get('latin_s1')}</i>"
+            elif r[0] > 34:  # 種下 & 種下下
+                if r[1] == 1:  # 命名規約為動物
+                    count = 0
+                    for l in pp.get('species_layers'):
+                        if count == 0:  # 種下rank不顯示
+                            # latin genus 可能是空的 & latin s1
+                            if pp.get('latin_genus') and pp.get('latin_s1'):
+                                formatted_name = f"<i>{pp.get('latin_genus')} {pp.get('latin_s1')} {l.get('latin_name')}</i>"
+                            else:
+                                query = f"SELECT properties FROM taxon_names WHERE id = {pp.get('species_id')}"
+                                conn = pymysql.connect(**db_settings)
+                                with conn.cursor() as cursor:
+                                    cursor.execute(query)
+                                    n = cursor.fetchall()
+                                    np = json.loads(n[0][0])
+                                    formatted_name = f"<i>{np.get('latin_genus')} {np.get('latin_s1')} {l.get('latin_name')}</i>"
+                        else:  # 種下下rank需顯示
+                            formatted_name += f" {l.get('rank_abbreviation')} <i>{l.get('latin_name')}</i>"
+                        count += 1
+                else:  # 命名規約為植物
+                    # latin genus 可能是空的 & latin s1
+                    if pp.get('latin_genus') and pp.get('latin_s1'):
+                        formatted_name = f"<i>{pp.get('latin_genus')} {pp.get('latin_s1')}</i>"
+                    else:
+                        query = f"SELECT properties FROM taxon_names WHERE id = {pp.get('species_id')}"
+                        conn = pymysql.connect(**db_settings)
+                        with conn.cursor() as cursor:
+                            cursor.execute(query)
+                            n = cursor.fetchall()
+                            np = json.loads(n[0][0])
+                            formatted_name = f"<i>{np.get('latin_genus')} {np.get('latin_s1')}</i>"
+                    for l in pp.get('species_layers'):
+                        formatted_name += f" {l.get('rank_abbreviation')} <i>{l.get('latin_name')}</i>"
+            rows.append([r[3], formatted_name])
     # 雜交組合最後處理（要等學名已經建立）
     if hybrid_name_list:
         query = f"WITH view as (SELECT tnhp.taxon_name_id, an.name_with_tag FROM taxon_name_hybrid_parent tnhp \
@@ -220,7 +249,7 @@ name_list = [str(r[0]) for r in results]
 
 
 # 如果parent name有修改再修改
-query = "SELECT tnhp.taxon_name_id taxon_name_hybrid_parent tnhp \
+query = "SELECT tnhp.taxon_name_id FROM taxon_name_hybrid_parent tnhp \
     JOIN taxon_names tn ON tnhp.parent_taxon_name_id = tn.id \
     WHERE tn.created_at > (select max(updated_at) from api_names) or tn.updated_at > (select max(updated_at) from api_names) \
         "
@@ -246,18 +275,20 @@ for r in rows:
 
 # 3 api_taxon_usages
 # 取得所有相關的學名
-def get_related_names(taxon_name_id, rank_id, df, new_names):
+def get_related_names(taxon_name_id, df, new_names):
     new_names.remove(taxon_name_id)  # remove current taxon_name_id
-    query = f'SELECT reference_id, `group`, id FROM reference_usages WHERE taxon_name_id = {taxon_name_id} AND status NOT IN ("", "undetermined")'
+    query = f'''SELECT ru.reference_id, ru.`group`, ru.id, tn.rank_id FROM reference_usages ru
+                JOIN taxon_names tn ON ru.taxon_name_id = tn.id
+                WHERE ru.taxon_name_id = {taxon_name_id} AND ru.status NOT IN ("", "undetermined")'''
     with conn.cursor() as cursor:
         cursor.execute(query)
         ref_group_pair = cursor.fetchall()
     query = f'SELECT DISTINCT(ru.taxon_name_id) FROM reference_usages ru \
                 INNER JOIN taxon_names tn ON ru.taxon_name_id = tn.id  \
-                WHERE ru.status NOT IN ("", "undetermined") AND tn.rank_id = {rank_id} '
+                WHERE ru.status NOT IN ("", "undetermined")'
     p_query = ''
     for p in range(len(ref_group_pair)):
-        df = df.append({'ru_id': ref_group_pair[p][2], 'reference_id': ref_group_pair[p][0], 'group': ref_group_pair[p][1], 'taxon_name_id': taxon_name_id, 'rank_id': rank_id}, ignore_index=True)
+        df = df.append({'ru_id': ref_group_pair[p][2], 'reference_id': ref_group_pair[p][0], 'group': ref_group_pair[p][1], 'taxon_name_id': taxon_name_id, 'rank_id': ref_group_pair[p][3]}, ignore_index=True)
         if p < max(range(len(ref_group_pair))):
             p_query += f' (ru.reference_id = {ref_group_pair[p][0]} AND ru.`group` = {ref_group_pair[p][1]}) OR'
         else:
@@ -312,19 +343,21 @@ for i in results.index:
         new_names = []
         df = pd.DataFrame()
         # get all reference_id & group
-        query = f'SELECT reference_id, `group`, id FROM reference_usages WHERE taxon_name_id = {row.taxon_name_id} AND status NOT IN ("", "undetermined")'
+        query = f'''SELECT ru.reference_id, ru.`group`, ru.id, tn.rank_id FROM reference_usages ru
+                    JOIN taxon_names tn ON ru.taxon_name_id = tn.id
+                    WHERE ru.taxon_name_id = {row.taxon_name_id} AND ru.status NOT IN ("", "undetermined")'''
         with conn.cursor() as cursor:
             cursor.execute(query)
             ref_group_pair = cursor.fetchall()
         # 根據有的 reference_id & group 再去抓抓看有沒有別的name_id (需排除status為空值或未決的資料)
-        # 如果有其他name_id的話，就有可能是不同rank，需要指定rank
+        # ??? 不確定先移除此處理 -> 如果有其他name_id的話，就有可能是不同rank，需要指定rank
         query = f'SELECT DISTINCT(ru.taxon_name_id) FROM reference_usages ru \
                     INNER JOIN taxon_names tn ON ru.taxon_name_id = tn.id  \
-                    WHERE ru.status NOT IN ("", "undetermined") AND tn.rank_id = {row.rank_id} '
+                    WHERE ru.status NOT IN ("", "undetermined")'
         p_query = ''
         for p in range(len(ref_group_pair)):
             df = df.append({'ru_id': ref_group_pair[p][2], 'reference_id': ref_group_pair[p][0], 'group': ref_group_pair[p]
-                           [1], 'taxon_name_id': row.taxon_name_id, 'rank_id': row.rank_id}, ignore_index=True)
+                           [1], 'taxon_name_id': row.taxon_name_id, 'rank_id': ref_group_pair[p][3]}, ignore_index=True)
             if p < max(range(len(ref_group_pair))):
                 p_query += f' (ru.reference_id = {ref_group_pair[p][0]} AND ru.`group` = {ref_group_pair[p][1]}) OR'
             else:
@@ -340,19 +373,20 @@ for i in results.index:
         while len(new_names) > 0:
             for nn in new_names:
                 checked_name_id += [nn]
-                new_names, df = get_related_names(nn, row.rank_id, df, new_names)
-        df = df.astype('int32')
+                new_names, df = get_related_names(nn, df, new_names)
+        # df = df.astype('int32')
         df['tmp_taxon_id'] = tmp_taxon_id
         total_df = total_df.append(df, ignore_index=True)
 
 total_df = total_df.drop_duplicates()
+total_df = total_df.astype('int32')
 
 # 取最新接受名，其他為同物異名或誤用名
 # reference_id, group, taxon_name_id
 # 抓status, publish_year
 
-query = f'SELECT id, publish_year, JSON_EXTRACT(properties, "$.doi") FROM `references` \
-          WHERE id IN {tuple(total_df.reference_id.unique())}'
+query = f"""SELECT id, publish_year, JSON_EXTRACT(properties, "$.doi") FROM `references` 
+            WHERE id IN ({str(total_df.reference_id.unique()).replace('[','').replace(']','')})"""
 
 with conn.cursor() as cursor:
     cursor.execute(query)
@@ -363,8 +397,10 @@ with conn.cursor() as cursor:
 total_df = total_df.merge(results)
 
 
-query = f'SELECT id, status, taxon_name_id, parent_taxon_name_id FROM reference_usages \
-          WHERE id IN {tuple(total_df.ru_id.unique())}'
+str(list(total_df.ru_id.unique())).replace('[','').replace(']','')
+
+query = f"""SELECT id, status, taxon_name_id, parent_taxon_name_id FROM reference_usages 
+          WHERE id IN ({str(list(total_df.ru_id.unique())).replace('[','').replace(']','')})"""
 
 with conn.cursor() as cursor:
     cursor.execute(query)
@@ -382,6 +418,7 @@ taxon_list = total_df.tmp_taxon_id.unique()
 total_df['taxon_status'] = ''
 total_df['is_latest'] = False
 total_df['publish_date'] = ''
+
 
 
 for t in taxon_list:
@@ -472,7 +509,8 @@ for nt in new_taxon_list:
         results = cursor.fetchall()
         n_list = []
         for n in results[0]:
-            n_list += json.loads(n)
+            if n:
+                n_list += json.loads(n)
         for nn in n_list:
             if nn.get('language') == 'zh-tw' and nn.get('name') not in common_names:
                 common_names.append(nn.get('name'))
@@ -507,13 +545,16 @@ for nt in new_taxon_list:
         cursor.execute(query)
         results = cursor.fetchall()
         results = json.loads(results[0][0])
-        is_endemic = results.get('is_endemic')
-        alien_type = results.get('alien_type')
-        is_fossil = results.get('is_fossil')
-        is_terrestrial = results.get('is_terrestrial')
-        is_freshwater = results.get('is_freshwater')
-        is_brackish = results.get('is_brackish')
-        is_marine = results.get('is_marine')
+        if results:
+            is_endemic = results.get('is_endemic')
+            alien_type = results.get('alien_type')
+            is_fossil = results.get('is_fossil')
+            is_terrestrial = results.get('is_terrestrial')
+            is_freshwater = results.get('is_freshwater')
+            is_brackish = results.get('is_brackish')
+            is_marine = results.get('is_marine')
+        else:
+            is_endemic, alien_type, is_fossil, is_terrestrial, is_freshwater, is_brackish, is_marine = None, None, None, None, None, None, None
     # 當前的taxon_id
     query = "SELECT max(taxon_id) FROM api_taxon"
     with conn.cursor() as cursor:
@@ -569,35 +610,39 @@ for nt in new_taxon_list:
             conn.commit()
     # api_taxon_tree
     query = f"""
-            INSERT INTO api_taxon_tree (taxon_id, path)
-            WITH RECURSIVE find_ancestor (rank_id, taxon_name_id, path, taxon_id) AS
-            (
-                SELECT t.rank_id, c.taxon_name_id, cast(c.taxon_id as CHAR(1000)) as path, c.taxon_id
-                FROM api_taxon_usages c
-                JOIN taxon_names t on c.taxon_name_id = t.id 
-                WHERE c.parent_taxon_name_id IS NULL and c.is_latest = 1 and c.status = 'accepted' 
-                UNION ALL
-                SELECT t.rank_id, c.taxon_name_id, concat(cast(c.taxon_id as CHAR(1000)) , '>',  path), c.taxon_id
-                FROM find_ancestor cp
-                JOIN api_taxon_usages c ON cp.taxon_name_id = c.parent_taxon_name_id
-                JOIN taxon_names t on c.taxon_name_id = t.id 
-                WHERE c.is_latest = 1 and c.status = 'accepted' 
-            )
-            SELECT taxon_id, path
-            FROM find_ancestor WHERE taxon_id = '{taxon_id}';"""
+            INSERT INTO api_taxon_tree (taxon_id, path, parent_taxon_id)
+            WITH RECURSIVE find_ancestor (rank_id, taxon_name_id, path, taxon_id, parent_taxon_id) AS
+                (
+                    SELECT t.rank_id, c.taxon_name_id, cast(c.taxon_id as CHAR(1000)) as path, c.taxon_id, b.taxon_id
+                    FROM api_taxon_usages c
+                    JOIN taxon_names t on c.taxon_name_id = t.id 
+                            LEFT JOIN api_taxon b ON c.parent_taxon_name_id = b.accepted_taxon_name_id
+                    WHERE c.parent_taxon_name_id IS NULL and c.is_latest = 1 and c.status = 'accepted' 
+                    UNION ALL
+                    SELECT t.rank_id, c.taxon_name_id, concat(cast(c.taxon_id as CHAR(1000)) , '>',  path), c.taxon_id, b.taxon_id
+                    FROM find_ancestor cp
+                    JOIN api_taxon_usages c ON cp.taxon_name_id = c.parent_taxon_name_id
+                    JOIN taxon_names t on c.taxon_name_id = t.id 
+                        LEFT JOIN api_taxon b ON c.parent_taxon_name_id = b.accepted_taxon_name_id
+                    WHERE c.is_latest = 1 and c.status = 'accepted' 
+                )
+            SELECT taxon_id, path, parent_taxon_id
+            FROM find_ancestor WHERE taxon_id = '{taxon_id}';
+            """
     with conn.cursor() as cursor:
         cursor.execute(query)
         conn.commit()
     # links -> 會需要先知道階層
     print('link')
     if links := get_links(taxon_id):
-        query =  f"""UPDATE api_taxon
-                    SET links=%s
-                    WHERE taxon_id = '{taxon_id}'
-                    """
-        with conn.cursor() as cursor:
-            cursor.execute(query, json.dumps(links))
-            conn.commit()
+        for rl in links:
+            query =  f"""INSERT INTO api_taxon_link
+                        (taxon_id, source_id, suffix)
+                        VALUES(%s, %s, %s)
+                        """
+            with conn.cursor() as cursor:
+                cursor.execute(query, (taxon_id, source_dict[rl['source']], rl['suffix']))
+                conn.commit()
 
 # 檢查是不是所有都有寫入Taxon tree -> 有缺是因為少了reference_usages
 
@@ -660,7 +705,7 @@ if all(check_1_count==1) and all(check_2_count==1):
                 query = f"INSERT INTO api_taxon_history (type, taxon_id, content ) \
                             VALUES (%s, %s, %s)"
                 with conn.cursor() as cursor:
-                    cursor.execute(query, (1, taxon_id, json.dumps({'taxon_name_id':new_syn})))
+                    cursor.execute(query, (1, taxon_id, json.dumps({'taxon_name_id':int(new_syn)})))
                     conn.commit()
         # 寫入api_taxon
         i = rows[(rows['is_latest']) & (rows['taxon_status'] == 'accepted')].index[0] # 接受的row index
@@ -825,8 +870,13 @@ with conn.cursor() as cursor:
 
 tree_merged = trees.merge(new_trees)
 
+
 for t in tree_merged[tree_merged.new_path != tree_merged.path].index:
     tree_row = tree_merged.iloc[t]
+    path_list = tree_row.new_path
+    path_list = path_list.split('>')
+    if len(path_list) > 1:
+        parent_taxon_id = path_list[1]
     # 寫入taxon_history
     query = f"INSERT INTO api_taxon_history (type, taxon_id, content ) \
                 VALUES (%s, %s, %s)"
@@ -834,7 +884,10 @@ for t in tree_merged[tree_merged.new_path != tree_merged.path].index:
         cursor.execute(query, (4, taxon_id, json.dumps({'old': tree_row.path, 'new': tree_row.new_path })))
         conn.commit()
     # 更新taxon_tree
-    query = f"UPDATE api_taxon_tree SET path = '{tree_row.new_path}', updated_at = CURRENT_TIMESTAMP WHERE taxon_id = '{tree_row.taxon_id}'"
+    if len(path_list) > 1:
+        query = f"UPDATE api_taxon_tree SET path = '{tree_row.new_path}', updated_at = CURRENT_TIMESTAMP, parent_taxon_id = '{parent_taxon_id}' WHERE taxon_id = '{tree_row.taxon_id}'"
+    else:
+        query = f"UPDATE api_taxon_tree SET path = '{tree_row.new_path}', updated_at = CURRENT_TIMESTAMP WHERE taxon_id = '{tree_row.taxon_id}'"
     with conn.cursor() as cursor:
         cursor.execute(query)
         conn.commit()
@@ -998,13 +1051,13 @@ def get_links(taxon_id, updated=False):
     for i in nc_df.linkurl:
         links += [{'source': 'nc', 'suffix': i.split('?')[1]}]
     for n in results['name']:
-        url = f"http://host.docker.internal:8080/api.php?names={n}&source=col&format=json"
+        url = f"http://35.77.221.186/api.php?names={n}&source=col&format=json"
         res = requests.get(url)
         if res.status_code == 200:
             data = res.json()
-            if len(data['data']) == 1:
-                if len(data['data'][0]['results']) ==1:
-                    l = {'source': 'col', 'suffix': data['data'][0]['results'][0]['accepted_namecode']}
+            if len(data['data'][0][0]) == 1:
+                if len(data['data'][0][0]['results']) ==1:
+                    l = {'source': 'col', 'suffix': data['data'][0][0]['results'][0]['accepted_namecode']}
                     if l not in links:
                         links.append(l)
     # Orthoptera
@@ -1040,7 +1093,7 @@ def get_links(taxon_id, updated=False):
             for d in data:
                 hie_str += d[0] + '/'
             if hie_str:
-                links += ['source','amphibiansoftheworld', 'suffix', hie_str]
+                links += [{'source':'amphibiansoftheworld', 'suffix':hie_str}]
     if updated:
         query = f"SELECT links FROM api_taxon WHERE taxon_id = '{taxon_id}'"
         with conn.cursor() as cursor:

@@ -451,24 +451,62 @@ df.to_csv('hie_202205.csv', index=False)
 
 
 ##### 20220614 改存 api_taxon_tree -> 為了更新方便
+##### 20220720 加存parent_taxon_id
 """
-INSERT INTO api_taxon_tree (taxon_id, path)
-WITH RECURSIVE find_ancestor (rank_id, taxon_name_id, path, taxon_id) AS
+INSERT INTO api_taxon_tree (taxon_id, path, parent_taxon_id)
+WITH RECURSIVE find_ancestor (rank_id, taxon_name_id, path, taxon_id, parent_taxon_id) AS
     (
-        SELECT t.rank_id, c.taxon_name_id, cast(c.taxon_id as CHAR(1000)) as path, c.taxon_id
+        SELECT t.rank_id, c.taxon_name_id, cast(c.taxon_id as CHAR(1000)) as path, c.taxon_id, b.taxon_id
         FROM api_taxon_usages c
         JOIN taxon_names t on c.taxon_name_id = t.id 
+        		 LEFT JOIN api_taxon b ON c.parent_taxon_name_id = b.accepted_taxon_name_id
         WHERE c.parent_taxon_name_id IS NULL and c.is_latest = 1 and c.status = 'accepted' 
         UNION ALL
-        SELECT t.rank_id, c.taxon_name_id, concat(cast(c.taxon_id as CHAR(1000)) , '>',  path), c.taxon_id
+        SELECT t.rank_id, c.taxon_name_id, concat(cast(c.taxon_id as CHAR(1000)) , '>',  path), c.taxon_id, b.taxon_id
         FROM find_ancestor cp
         JOIN api_taxon_usages c ON cp.taxon_name_id = c.parent_taxon_name_id
         JOIN taxon_names t on c.taxon_name_id = t.id 
+             LEFT JOIN api_taxon b ON c.parent_taxon_name_id = b.accepted_taxon_name_id
         WHERE c.is_latest = 1 and c.status = 'accepted' 
     )
-SELECT taxon_id, path
+SELECT taxon_id, path, parent_taxon_id
 FROM find_ancestor;
 """
+
+#### 20220715 種下 parent_taxon_name_id 存錯成屬, 改回種 
+# reference_usages, api_taxon_usages, api_taxon_tree
+query = 'SELECT JSON_EXTRACT(properties, "$.species_id") FROM taxon_names WHERE rank_id > 34;'
+
+
+
+query = "SELECT taxon_id, path FROM api_taxon_tree"
+conn = pymysql.connect(**db_settings)
+with conn.cursor() as cursor:
+    cursor.execute(query)
+    results = cursor.fetchall()
+
+
+new = []
+for r in results:
+    path_list = r[1].split('>')
+    if len(path_list) > 1 :
+        parent_taxon = path_list[1]
+    else:
+        parent_taxon = None
+    new += [(r[0], parent_taxon)]
+
+run = False
+for n in new:
+    if n == ('t010726', 't008337'):
+        run = True
+    if run:
+        print(n[0])
+        query = f"UPDATE api_taxon_tree SET parent_taxon_id = %s WHERE taxon_id = %s"
+        with conn.cursor() as cursor:
+            cursor.execute(query,(n[1], n[0]))
+            conn.commit()
+
+
 
 # api_names
 query = "SELECT rank_id, nomenclature_id, properties, id FROM taxon_names WHERE rank_id <> 47"
@@ -627,7 +665,7 @@ for g in results.reference_id.unique():
     if len(author_list) == 1:
         authors = author_list[0]
     elif len(author_list) == 2:
-        authors = ', '.join(author_list)
+        authors = ' & '.join(author_list)
     else:  # 三人或以上
         authors = ', '.join(author_list[:-1]) + ' & ' + author_list[-1]
     citation_df.append((g, authors + f' ({rows.year.unique()[0]})'))
@@ -636,8 +674,11 @@ for g in results.reference_id.unique():
 conn = pymysql.connect(**db_settings)
 for c in citation_df:
     with conn.cursor() as cursor:
-        query = "INSERT INTO api_citations (reference_id, author) VALUES (%s, %s)"
-        cursor.execute(query, (c))
+        # query = "INSERT INTO api_citations (reference_id, author) VALUES (%s, %s)"
+        # cursor.execute(query, (c))
+        # conn.commit()
+        query = "UPDATE api_citations SET author = %s WHERE reference_id = %s"
+        cursor.execute(query, (c[1],c[0]))
         conn.commit()
 
 

@@ -21,7 +21,7 @@ from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 from rest_framework.schemas import AutoSchema
 
-from .utils import rank_map_c, rank_map
+from api.utils import rank_map_c, rank_map, update_citations, update_names
 
 import requests
 
@@ -34,6 +34,67 @@ db_settings = {
 }
 
 match_url = env('NOMENMATCH_URL')
+
+
+def web_stat_stat(request):
+        conn = pymysql.connect(**db_settings)
+        response = {}
+        with conn.cursor() as cursor:
+            # 各界物種數
+            query = """SELECT category, count FROM api_web_stat WHERE title = 'kingdom_count'"""  
+            cursor.execute(query)
+            results = cursor.fetchall()
+            response['kingdom_count'] = results
+            # 各階層數量
+            query = """SELECT category, count FROM api_web_stat WHERE title = 'rank_count'"""  
+            cursor.execute(query)
+            results = cursor.fetchall()
+            response['rank_count'] = results
+            # 各類生物種數&特有比例
+            query = """SELECT category, count, total_count FROM api_web_stat WHERE title = 'endemic_count'"""  
+            cursor.execute(query)
+            results = cursor.fetchall()
+            response['endemic_count'] = results
+            # 物種來源比例
+            query = """SELECT category, count FROM api_web_stat WHERE title = 'source_count'"""  
+            cursor.execute(query)
+            results = cursor.fetchall()
+            response['source_count'] = results
+            # 全球物種數比較
+            query = """SELECT category, count, total_count FROM api_web_stat WHERE title = 'animalia_compare'"""  
+            cursor.execute(query)
+            results = cursor.fetchall()
+            response['animalia_compare'] = results
+            query = """SELECT category, count, total_count FROM api_web_stat WHERE title = 'arthropoda_compare'"""  
+            cursor.execute(query)
+            results = cursor.fetchall()
+            response['arthropoda_compare'] = results
+            query = """SELECT category, count, total_count FROM api_web_stat WHERE title = 'chordata_compare'"""  
+            cursor.execute(query)
+            results = cursor.fetchall()
+            response['chordata_compare'] = results
+            query = """SELECT category, count, total_count FROM api_web_stat WHERE title = 'plantae_compare'"""  
+            cursor.execute(query)
+            results = cursor.fetchall()
+            response['plantae_compare'] = results
+            # 全球物種數比較總表
+            query = """SELECT path, total_count, count, provider FROM api_web_table"""  
+            cursor.execute(query)
+            results = cursor.fetchall()
+            response['compare_table'] = results
+
+        return HttpResponse(json.dumps(response))
+
+
+def web_index_stat(request):
+        conn = pymysql.connect(**db_settings)
+        with conn.cursor() as cursor:
+            query = """SELECT category, count FROM api_web_stat WHERE title = 'index'"""  
+            cursor.execute(query)
+            results = cursor.fetchall()
+            # [["reference", 121], ["taxon", 60204], ["name", 86725]]        
+            return HttpResponse(json.dumps(results))
+
 
 def validate(date_text):
     try:
@@ -570,9 +631,12 @@ class NameView(APIView):
             taxon_group = request.GET.get('taxon_group', '').strip()
             limit = 300 if limit > 300 else limit  # 最大值 300
 
+            # update names
+            update_names()
+            update_citations()
+
             # print(name_id, scientific_name, updated_at, created_at, taxon_group)
             conn = pymysql.connect(**db_settings)
-            # TODO protologue需要根據顯示邏輯呈現
             query = "SELECT tn.id, tn.rank_id, tn.name, tn.formatted_authors, \
                             tn.original_taxon_name_id, tn.note, tn.created_at, tn.updated_at, \
                             n.name, \
@@ -585,7 +649,7 @@ class NameView(APIView):
                             an.name_with_tag \
                             FROM taxon_names AS tn \
                             JOIN nomenclatures n ON tn.nomenclature_id = n.id \
-                            JOIN api_names an ON tn.id = an.taxon_name_id \
+                            LEFT JOIN api_names an ON tn.id = an.taxon_name_id \
                             LEFT JOIN api_citations c ON tn.reference_id = c.reference_id"
             count_query = "SELECT COUNT(*) FROM taxon_names tn"
 
@@ -671,7 +735,6 @@ class NameView(APIView):
                 df = pd.DataFrame(df, columns=['name_id', 'rank', 'simple_name', 'name_author', 'original_name_id', 'note',
                                                'created_at', 'updated_at', 'nomenclature_name', 'is_hybrid', 'protologue',
                                                'type_name_id', 'latin_genus', 'latin_s1', 'species_layers', 'formatted_name'])
-
                 cursor.execute(count_query)
                 len_total = cursor.fetchall()[0][0]
                 # only rank >= 34 has 物種學名分欄 & original_name_id
@@ -689,16 +752,28 @@ class NameView(APIView):
                 #             df.loc[df.type_name_id == t, 'type_name'] = type_name_result[0]
                 # find hybrid_parent
                 df['hybrid_parent'] = None
+
                 for h in df[['is_hybrid', 'name_id']].index:
-                    if df.loc[h]['is_hybrid'] == 'true':
-                        query_hybrid_parent = f"SELECT GROUP_CONCAT( CONCAT(tn.name, ' ',tn.formatted_authors) SEPARATOR ' × ' ) FROM taxon_name_hybrid_parent AS tnhp \
-                                                JOIN taxon_names AS tn ON tn.id = tnhp.parent_taxon_name_id \
-                                                WHERE tnhp.taxon_name_id = {df.loc[h]['name_id']} \
-                                                GROUP BY tnhp.taxon_name_id"
-                        with conn.cursor() as cursor:
-                            cursor.execute(query_hybrid_parent)
-                            hybrid_name_result = cursor.fetchall()
-                        df.loc[df.name_id == df.loc[h]['name_id'], 'hybrid_parent'] = hybrid_name_result[0]
+                    # TODO 目前is_hybrid都被設成False，這樣會抓不到，先暫時寫成下面的處理
+                    # if df.loc[h]['is_hybrid'] == 'true':
+                    #     query_hybrid_parent = f"SELECT GROUP_CONCAT( CONCAT(tn.name, ' ',tn.formatted_authors) SEPARATOR ' × ' ) FROM taxon_name_hybrid_parent AS tnhp \
+                    #                             JOIN taxon_names AS tn ON tn.id = tnhp.parent_taxon_name_id \
+                    #                             WHERE tnhp.taxon_name_id = {df.loc[h]['name_id']} \
+                    #                             GROUP BY tnhp.taxon_name_id"
+                    #     with conn.cursor() as cursor:
+                    #         cursor.execute(query_hybrid_parent)
+                    #         hybrid_name_result = cursor.fetchall()
+                    #     df.loc[df.name_id == df.loc[h]['name_id'], 'hybrid_parent'] = hybrid_name_result[0]
+                    query_hybrid_parent = f"SELECT GROUP_CONCAT( CONCAT(tn.name, ' ',tn.formatted_authors) SEPARATOR ' × ' ) FROM taxon_name_hybrid_parent AS tnhp \
+                                            JOIN taxon_names AS tn ON tn.id = tnhp.parent_taxon_name_id \
+                                            WHERE tnhp.taxon_name_id = {df.loc[h]['name_id']} \
+                                            GROUP BY tnhp.taxon_name_id"
+                    with conn.cursor() as cursor:
+                        cursor.execute(query_hybrid_parent)
+                        hybrid_name_result = cursor.fetchall()
+                        if hybrid_name_result:
+                            df.loc[df.name_id == df.loc[h]['name_id'], 'hybrid_parent'] = hybrid_name_result[0][0]
+                            df.loc[df.name_id == df.loc[h]['name_id'], 'is_hybrid'] = True
 
                 # organize results
                 df = df.replace({np.nan: None})
@@ -724,7 +799,6 @@ class NameView(APIView):
                         df.loc[n, 'type_name_id'] = int(df.type_name_id[n])
                     else:
                         df.loc[n, 'type_name_id'] = None
-
 
                 # subset & rename columns
                 df = df[['name_id', 'nomenclature_name', 'rank', 'simple_name', 'name_author', 'formatted_name', 'name', 'original_name_id',
