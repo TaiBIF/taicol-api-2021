@@ -291,7 +291,7 @@ class HigherTaxaView(APIView):
                 if path:
                     path = path[0].split('>')              
                     query = f"SELECT t.taxon_id, t.accepted_taxon_name_id, tn.name, \
-                            tn.formatted_authors, an.name_with_tag, t.rank_id, t.common_name_c \
+                            an.name_author, an.formatted_name, t.rank_id, t.common_name_c \
                             FROM api_taxon t \
                             JOIN taxon_names tn ON t.accepted_taxon_name_id = tn.id \
                             JOIN api_names an ON t.accepted_taxon_name_id = an.taxon_name_id \
@@ -439,7 +439,7 @@ class TaxonView(APIView):
             query = "SELECT t.taxon_id, t.rank_id, t.accepted_taxon_name_id, t.common_name_c, t.alternative_name_c, \
                             t.is_hybrid, t.is_endemic, t.alien_type, t.is_fossil, t.is_terrestrial, \
                             t.is_freshwater, t.is_brackish, t.is_marine, ac.cites_listing, ac.iucn_category, ac.red_category, ac.protected_category, ac.sensitive_suggest, \
-                            t.created_at, t.updated_at, tn.name, tn.formatted_authors, an.name_with_tag FROM api_taxon t \
+                            t.created_at, t.updated_at, tn.name, an.name_author, an.formatted_name FROM api_taxon t \
                             JOIN taxon_names tn ON t.accepted_taxon_name_id = tn.id \
                             JOIN api_names an ON t.accepted_taxon_name_id = an.taxon_name_id \
                             LEFT JOIN api_conservation ac ON t.taxon_id = ac.taxon_id"
@@ -529,7 +529,7 @@ class TaxonView(APIView):
                     df['formatted_synonyms'] = ''
                     df['misapplied'] = ''
                     df['formatted_misapplied'] = ''
-                    query = f"SELECT tu.taxon_id, tu.status, GROUP_CONCAT(DISTINCT(an.name_with_tag) SEPARATOR ','), GROUP_CONCAT(DISTINCT(tn.name) SEPARATOR ',') \
+                    query = f"SELECT tu.taxon_id, tu.status, GROUP_CONCAT(DISTINCT(an.formatted_name) SEPARATOR ','), GROUP_CONCAT(DISTINCT(tn.name) SEPARATOR ',') \
                                 FROM api_taxon_usages tu \
                                 JOIN api_names an ON tu.taxon_name_id = an.taxon_name_id \
                                 JOIN taxon_names tn ON tu.taxon_name_id = tn.id \
@@ -637,7 +637,7 @@ class NameView(APIView):
 
             # print(name_id, scientific_name, updated_at, created_at, taxon_group)
             conn = pymysql.connect(**db_settings)
-            query = "SELECT tn.id, tn.rank_id, tn.name, tn.formatted_authors, \
+            query = "SELECT tn.id, tn.rank_id, tn.name, an.name_author, \
                             tn.original_taxon_name_id, tn.note, tn.created_at, tn.updated_at, \
                             n.name, \
                             JSON_EXTRACT(tn.properties,'$.is_hybrid_formula'), \
@@ -646,7 +646,7 @@ class NameView(APIView):
                             tn.properties ->> '$.latin_genus', \
                             tn.properties ->> '$.latin_s1',\
                             tn.properties ->> '$.species_layers',\
-                            an.name_with_tag \
+                            an.formatted_name \
                             FROM taxon_names AS tn \
                             JOIN nomenclatures n ON tn.nomenclature_id = n.id \
                             LEFT JOIN api_names an ON tn.id = an.taxon_name_id \
@@ -764,8 +764,9 @@ class NameView(APIView):
                     #         cursor.execute(query_hybrid_parent)
                     #         hybrid_name_result = cursor.fetchall()
                     #     df.loc[df.name_id == df.loc[h]['name_id'], 'hybrid_parent'] = hybrid_name_result[0]
-                    query_hybrid_parent = f"SELECT GROUP_CONCAT( CONCAT(tn.name, ' ',tn.formatted_authors) SEPARATOR ' × ' ) FROM taxon_name_hybrid_parent AS tnhp \
+                    query_hybrid_parent = f"SELECT GROUP_CONCAT( CONCAT_WS(tn.name, ' ',an.name_author) SEPARATOR ' × ' ) FROM taxon_name_hybrid_parent AS tnhp \
                                             JOIN taxon_names AS tn ON tn.id = tnhp.parent_taxon_name_id \
+                                            LEFT JOIN api_names an ON an.taxon_name_id = tn.id \
                                             WHERE tnhp.taxon_name_id = {df.loc[h]['name_id']} \
                                             GROUP BY tnhp.taxon_name_id"
                     with conn.cursor() as cursor:

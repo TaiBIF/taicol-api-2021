@@ -14,7 +14,7 @@ db_settings = {
 
 conn = pymysql.connect(**db_settings)
 
-query = """SELECT at.taxon_id, at.accepted_taxon_name_id, tn.name, tn.formatted_authors, an.name_with_tag,
+query = """SELECT at.taxon_id, at.accepted_taxon_name_id, tn.name, an.name_author, an.formatted_name,
             at.common_name_c,  at.alternative_name_c, r.display ->> '$."en-us"', att.path
             FROM api_taxon at
             JOIN taxon_names tn ON at.accepted_taxon_name_id = tn.id
@@ -33,7 +33,7 @@ df['synonyms'] = ''
 df['formatted_synonyms'] = ''
 df['misapplied'] = ''
 df['formatted_misapplied'] = ''
-query = f"SELECT tu.taxon_id, tu.status, GROUP_CONCAT(DISTINCT(an.name_with_tag) SEPARATOR ','), GROUP_CONCAT(DISTINCT(tn.name) SEPARATOR ',') \
+query = f"SELECT tu.taxon_id, tu.status, GROUP_CONCAT(DISTINCT(an.formatted_name) SEPARATOR ','), GROUP_CONCAT(DISTINCT(tn.name) SEPARATOR ',') \
             FROM api_taxon_usages tu \
             JOIN api_names an ON tu.taxon_name_id = an.taxon_name_id \
             JOIN taxon_names tn ON tu.taxon_name_id = tn.id \
@@ -66,7 +66,7 @@ for i in df.index:
             path = [p for p in path if p != taxon_id]
             if path:
                 query = f"SELECT t.taxon_id, t.accepted_taxon_name_id, tn.name, \
-                        tn.formatted_authors, an.name_with_tag, t.rank_id, t.common_name_c \
+                        an.name_author, an.formatted_name, t.rank_id, t.common_name_c \
                         FROM api_taxon t \
                         JOIN taxon_names tn ON t.accepted_taxon_name_id = tn.id \
                         JOIN api_names an ON t.accepted_taxon_name_id = an.taxon_name_id \

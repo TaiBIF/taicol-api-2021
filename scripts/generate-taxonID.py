@@ -563,16 +563,16 @@ for r in results:
                     formatted_name = f"<i>{np.get('latin_genus')} {np.get('latin_s1')}</i>"
             for l in pp.get('species_layers'):
                 formatted_name += f" {l.get('rank_abbreviation')} <i>{l.get('latin_name')}</i>"
-    query = f"INSERT INTO api_names (taxon_name_id, name_with_tag) VALUES (%s, %s);"
+    query = f"INSERT INTO api_names (taxon_name_id, formatted_name) VALUES (%s, %s);"
     with conn.cursor() as cursor:
         cursor.execute(query, (r[3], formatted_name))
         conn.commit()
 
 # 雜交組合最後處理（要等學名已經建立）
-query = "WITH view as (SELECT tnhp.taxon_name_id, an.name_with_tag FROM taxon_name_hybrid_parent tnhp \
+query = "WITH view as (SELECT tnhp.taxon_name_id, an.formatted_name FROM taxon_name_hybrid_parent tnhp \
          JOIN api_names an ON tnhp.parent_taxon_name_id = an.taxon_name_id \
          ORDER BY tnhp.order) \
-         SELECT taxon_name_id, group_concat(name_with_tag SEPARATOR ' × ') FROM view \
+         SELECT taxon_name_id, group_concat(formatted_name SEPARATOR ' × ') FROM view \
          GROUP BY taxon_name_id"
 
 conn = pymysql.connect(**db_settings)
@@ -580,12 +580,12 @@ with conn.cursor() as cursor:
     cursor.execute(query)
     results = cursor.fetchall()
 for r in results:
-    query = f"INSERT INTO api_names (taxon_name_id, name_with_tag) VALUES (%s, %s);"
+    query = f"INSERT INTO api_names (taxon_name_id, formatted_name) VALUES (%s, %s);"
     with conn.cursor() as cursor:
         cursor.execute(query, (r[0], r[1]))
         conn.commit()
 
-# name with HTML tag
+# name with HTML tag - formatted_name
 # 動物命名規約
 # 1. 屬以上抓latin name 且不用斜體
 # 2. 屬抓latin name且斜體
@@ -606,7 +606,7 @@ for r in results:
 # 6. 雜交組合 hybrid parent1 × hybrid parent2
 
 
-# TODO name with tag 的更新流程 -> 在每次更新taxon的時候處理
+# TODO formatted_name 的更新流程 -> 在每次更新taxon的時候處理
 
 # TODO 如果未來原本是種下的上階層是有效的種，但改為無效，要怎麼更新？
 

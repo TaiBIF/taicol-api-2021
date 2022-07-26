@@ -218,11 +218,11 @@ def update_names():
             rows.append([r[3], formatted_name])
     # 雜交組合最後處理（要等學名已經建立）
     if hybrid_name_list:
-        query = f"WITH view as (SELECT tnhp.taxon_name_id, an.name_with_tag FROM taxon_name_hybrid_parent tnhp \
+        query = f"WITH view as (SELECT tnhp.taxon_name_id, an.formatted_name FROM taxon_name_hybrid_parent tnhp \
                 JOIN api_names an ON tnhp.parent_taxon_name_id = an.taxon_name_id \
                 WHERE tnhp.taxon_name_id IN ({','.join(hybrid_name_list)}) \
                 ORDER BY tnhp.order) \
-                SELECT taxon_name_id, group_concat(name_with_tag SEPARATOR ' × ') FROM view \
+                SELECT taxon_name_id, group_concat(formatted_name SEPARATOR ' × ') FROM view \
                 GROUP BY taxon_name_id \
                 "
         conn = pymysql.connect(**db_settings)
@@ -234,8 +234,8 @@ def update_names():
     conn = pymysql.connect(**db_settings)
     for r in rows:
         with conn.cursor() as cursor:
-            query = "INSERT INTO api_names (taxon_name_id, name_with_tag, updated_at) VALUES(%s, %s, CURRENT_TIMESTAMP) \
-                    ON DUPLICATE KEY UPDATE name_with_tag=%s, updated_at = CURRENT_TIMESTAMP; "        
+            query = "INSERT INTO api_names (taxon_name_id, formatted_name, updated_at) VALUES(%s, %s, CURRENT_TIMESTAMP) \
+                    ON DUPLICATE KEY UPDATE formatted_name=%s, updated_at = CURRENT_TIMESTAMP; "        
             cursor.execute(query, (r[0], r[1], r[1]))
             conn.commit()
 
