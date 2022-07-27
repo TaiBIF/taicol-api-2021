@@ -61,6 +61,10 @@ def web_stat_stat(request):
             results = cursor.fetchall()
             response['source_count'] = results
             # 全球物種數比較
+            query = """SELECT category, count, total_count FROM api_web_stat WHERE title = 'kingdom_count'"""  
+            cursor.execute(query)
+            results = cursor.fetchall()
+            response['kingdom_compare'] = results
             query = """SELECT category, count, total_count FROM api_web_stat WHERE title = 'animalia_compare'"""  
             cursor.execute(query)
             results = cursor.fetchall()
@@ -641,7 +645,7 @@ class NameView(APIView):
                             tn.original_taxon_name_id, tn.note, tn.created_at, tn.updated_at, \
                             n.name, \
                             JSON_EXTRACT(tn.properties,'$.is_hybrid_formula'), \
-                            CONCAT(c.author, ' ', c.content), \
+                            CONCAT_WS(c.author, ' ', c.content), \
                             tn.properties ->> '$.type_name', \
                             tn.properties ->> '$.latin_genus', \
                             tn.properties ->> '$.latin_s1',\
