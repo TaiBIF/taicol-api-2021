@@ -448,7 +448,7 @@ for i in total_df.index:
     row = total_df.iloc[i]
     if row.is_latest:
         if row.status == 'not-accepted':
-            total_df.loc[i, 'taxon_status'] = 'synonyms'
+            total_df.loc[i, 'taxon_status'] = 'not-accepted'
         else:
             total_df.loc[i, 'taxon_status'] = row.status
     else:  # 不是最新的文獻
@@ -461,8 +461,8 @@ for i in total_df.index:
                 # 如果不一樣，且是misapplied, 設成misapplied
                 total_df.loc[i, 'taxon_status'] = row.status
             else:
-                # 如果不一樣，且不是misapplied, 設成synonyms
-                total_df.loc[i, 'taxon_status'] = 'synonyms'
+                # 如果不一樣，且不是misapplied, 設成not-accepted
+                total_df.loc[i, 'taxon_status'] = 'not-accepted'
 
 # 先看目前的name有沒有對應的taxon_id
 # 一個name只會對應到一個taxon?
@@ -694,13 +694,13 @@ if all(check_1_count==1) and all(check_2_count==1):
         print(taxon_id)
         # 是否有新增的taxon_name_id -> 新增同物異名
         # TODO 也有可能是刪除?
-        if any(rows.taxon_status == 'synonyms'):
-            query = f"SELECT DISTINCT(taxon_name_id) FROM api_taxon_usages WHERE taxon_id = '{taxon_id}' and `status`='synonyms'"
+        if any(rows.taxon_status == 'not-accepted'):
+            query = f"SELECT DISTINCT(taxon_name_id) FROM api_taxon_usages WHERE taxon_id = '{taxon_id}' and `status`='not-accepted'"
             with conn.cursor() as cursor:
                 cursor.execute(query)
                 syns = cursor.fetchall()
                 syns = [s[0] for s in syns]
-            for new_syn in rows[(rows.taxon_status=='synonyms')&~rows.taxon_name_id.isin(syns)].taxon_name_id.unique():
+            for new_syn in rows[(rows.taxon_status=='not-accepted')&~rows.taxon_name_id.isin(syns)].taxon_name_id.unique():
                 # 寫入api_taxon_history
                 query = f"INSERT INTO api_taxon_history (type, taxon_id, content ) \
                             VALUES (%s, %s, %s)"
@@ -1202,7 +1202,7 @@ def get_conservation_info(taxon_id, protected=protected, red=red, sensitive=sens
                 iucn_category = r[0]['category']
                 iucn_criteria = r[0]['criteria']
                 for rs in r:
-                    iucn_note += [{'name': rs['scientific_name'], 'taxon_id': int(rs['taxonid']) }]
+                    iucn_note += [{'name': rs['scientific_name'], 'taxon_id': int(rs['taxonid']), 'category': r[0]['category'] }]
     # CITES
     headers = {'X-Authentication-Token': env('CITES_TOKEN')} # t003006
     cites_df = pd.DataFrame(columns=['taxon_id','source_name','cites_id','cites_listing'])

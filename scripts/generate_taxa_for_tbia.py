@@ -37,13 +37,13 @@ query = f"SELECT tu.taxon_id, tu.status, GROUP_CONCAT(DISTINCT(an.formatted_name
             FROM api_taxon_usages tu \
             JOIN api_names an ON tu.taxon_name_id = an.taxon_name_id \
             JOIN taxon_names tn ON tu.taxon_name_id = tn.id \
-            WHERE tu.taxon_id IN ({str(df.taxon_id.to_list()).replace('[','').replace(']','')}) and tu.status IN ('synonyms', 'misapplied') \
+            WHERE tu.taxon_id IN ({str(df.taxon_id.to_list()).replace('[','').replace(']','')}) and tu.status IN ('not-accepted', 'misapplied') \
             GROUP BY tu.status, tu.taxon_id;"
 with conn.cursor() as cursor:
     cursor.execute(query)
     other_names = cursor.fetchall()
 for o in other_names:
-    if o[1] == 'synonyms':
+    if o[1] == 'not-accepted':
         df.loc[df['taxon_id'] == o[0], 'synonyms'] = o[3]
         df.loc[df['taxon_id'] == o[0], 'formatted_synonyms'] = o[2]
     elif o[1] == 'misapplied':

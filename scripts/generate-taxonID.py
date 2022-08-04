@@ -212,7 +212,7 @@ for i in total_df.index:
     row = total_df.iloc[i]
     if row.is_latest:
         if row.status == 'not-accepted':
-            total_df.loc[i, 'taxon_status'] = 'synonyms'
+            total_df.loc[i, 'taxon_status'] = 'not-accepted'
         else:
             total_df.loc[i, 'taxon_status'] = row.status
     else:  # 不是最新的文獻
@@ -225,8 +225,8 @@ for i in total_df.index:
                 # 如果不一樣，且是misapplied, 設成misapplied
                 total_df.loc[i, 'taxon_status'] = row.status
             else:
-                # 如果不一樣，且不是misapplied, 設成synonyms
-                total_df.loc[i, 'taxon_status'] = 'synonyms'
+                # 如果不一樣，且不是misapplied, 設成not-accepted
+                total_df.loc[i, 'taxon_status'] = 'not-accepted'
 
 # 寫入taxon table
 # 86624

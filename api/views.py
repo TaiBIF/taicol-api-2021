@@ -186,7 +186,7 @@ class NameMatchView(APIView):
                         # 如果reference_id是153, 則以空值取代
                         # df.loc[df['reference_id']==153, 'reference_year'] = None
                         # df['reference_id'] = df['reference_id'].replace({153:None})
-                        df['usage_status'] = df['usage_status'].replace({'accepted': 'Accepted', 'misapplied': 'Misapplied', 'synonyms': 'Not accepted'})
+                        df['usage_status'] = df['usage_status'].replace({'accepted': 'Accepted', 'misapplied': 'Misapplied', 'not-accepted': 'Not accepted'})
             response = {"status": {"code": 200, "message": "Success"},
                         "info": {"total": len(df)}, "data": df.to_dict('records')}
             # return HttpResponse(json.dumps(response, ensure_ascii=False, cls=DateTimeEncoder), content_type="application/json,charset=utf-8")
@@ -537,12 +537,12 @@ class TaxonView(APIView):
                                 FROM api_taxon_usages tu \
                                 JOIN api_names an ON tu.taxon_name_id = an.taxon_name_id \
                                 JOIN taxon_names tn ON tu.taxon_name_id = tn.id \
-                                WHERE tu.taxon_id IN (%s) and tu.status IN ('synonyms', 'misapplied') \
+                                WHERE tu.taxon_id IN (%s) and tu.status IN ('not-accepted', 'misapplied') \
                                 GROUP BY tu.status, tu.taxon_id;"
                     cursor.execute(query, ','.join(df.taxon_id.to_list()))
                     other_names = cursor.fetchall()
                     for o in other_names:
-                        if o[1] == 'synonyms':
+                        if o[1] == 'not-accepted':
                             df.loc[df['taxon_id'] == o[0], 'synonyms'] = o[3]
                             df.loc[df['taxon_id'] == o[0], 'formatted_synonyms'] = o[2]
                         elif o[1] == 'misapplied':
