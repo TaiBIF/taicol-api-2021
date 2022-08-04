@@ -552,6 +552,8 @@ class TaxonView(APIView):
                     df = df[['taxon_id', 'name_id', 'simple_name', 'name_author', 'formatted_name', 'synonyms', 'formatted_synonyms', 'misapplied', 'formatted_misapplied',
                             'rank', 'common_name_c', 'alternative_name_c', 'is_hybrid', 'is_endemic', 'alien_type', 'is_fossil', 'is_terrestrial', 'is_freshwater', 'is_brackish',
                              'is_marine', 'cites', 'iucn', 'redlist', 'protected', 'sensitive', 'created_at', 'updated_at']]
+                    df['cites'] = df['cites'].apply(lambda x: x.replace('1','I').replace('2','II').replace('3','III') if x else x)
+
 
                 # 加上其他欄位
                 response = {"status": {"code": 200, "message": "Success"},
