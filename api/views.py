@@ -217,7 +217,7 @@ class ReferencesView(APIView):
         try:
             df = pd.DataFrame(columns=['reference_id', 'citation', 'status', 'indications', 'is_taiwan', 'is_endemic', 'alien_type'])
             if name_id := request.GET.get('name_id'):
-                query = f"SELECT ru.reference_id, CONCAT(c.author, ' ' ,c.content), ru.status, ru.properties->>'$.indications', \
+                query = f"SELECT ru.reference_id, CONCAT_WS(' ' ,c.author, c.content), ru.status, ru.properties->>'$.indications', \
                          JSON_EXTRACT(ru.properties, '$.is_in_taiwan'), JSON_EXTRACT(ru.properties, '$.is_endemic'), ru.properties->>'$.alien_type' \
                          FROM reference_usages ru \
                          JOIN `references` r ON ru.reference_id = r.id \
@@ -238,7 +238,7 @@ class ReferencesView(APIView):
                             else:
                                 df.loc[i, 'indications'] = None
                 # 加上原始文獻
-                query = f"SELECT c.reference_id, CONCAT(c.author, ' ' ,c.content) \
+                query = f"SELECT c.reference_id, CONCAT_WS(' ' , c.author, c.content) \
                         FROM taxon_names tn \
                         JOIN api_citations c ON tn.reference_id = c.reference_id    \
                         WHERE tn.id = {name_id} AND tn.reference_id IS NOT NULL "
@@ -645,7 +645,7 @@ class NameView(APIView):
                             tn.original_taxon_name_id, tn.note, tn.created_at, tn.updated_at, \
                             n.name, \
                             JSON_EXTRACT(tn.properties,'$.is_hybrid_formula'), \
-                            CONCAT_WS(c.author, ' ', c.content), \
+                            CONCAT_WS(' ', c.author, c.content), \
                             tn.properties ->> '$.type_name', \
                             tn.properties ->> '$.latin_genus', \
                             tn.properties ->> '$.latin_s1',\
