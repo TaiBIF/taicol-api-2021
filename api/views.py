@@ -770,7 +770,7 @@ class NameView(APIView):
                     #         cursor.execute(query_hybrid_parent)
                     #         hybrid_name_result = cursor.fetchall()
                     #     df.loc[df.name_id == df.loc[h]['name_id'], 'hybrid_parent'] = hybrid_name_result[0]
-                    query_hybrid_parent = f"SELECT GROUP_CONCAT( CONCAT_WS(tn.name, ' ',an.name_author) SEPARATOR ' × ' ) FROM taxon_name_hybrid_parent AS tnhp \
+                    query_hybrid_parent = f"SELECT GROUP_CONCAT( CONCAT_WS(' ', tn.name, an.name_author) SEPARATOR ' × ' ) FROM taxon_name_hybrid_parent AS tnhp \
                                             JOIN taxon_names AS tn ON tn.id = tnhp.parent_taxon_name_id \
                                             LEFT JOIN api_names an ON an.taxon_name_id = tn.id \
                                             WHERE tnhp.taxon_name_id = {df.loc[h]['name_id']} \
