@@ -222,7 +222,7 @@ class ReferencesView(APIView):
                          FROM reference_usages ru \
                          JOIN `references` r ON ru.reference_id = r.id \
                          JOIN api_citations c ON ru.reference_id = c.reference_id \
-                         WHERE ru.taxon_name_id = {name_id} and r.id != 153 and ru.status != ''"  # 不給TaiCOL backbone
+                         WHERE ru.taxon_name_id = {name_id} and r.id != 153 and ru.status != '' and ru.is_title != 1 "  # 不給TaiCOL backbone
                 conn = pymysql.connect(**db_settings)
                 with conn.cursor() as cursor:
                     cursor.execute(query)
@@ -696,7 +696,7 @@ class NameView(APIView):
                     query_taxon_group = f"with recursive cte (id, taxon_name_id, parent_taxon_name_id) as ( \
                                         select     id, taxon_name_id,parent_taxon_name_id \
                                         from       reference_usages \
-                                        where      parent_taxon_name_id = {current_id} \
+                                        where      parent_taxon_name_id = {current_id} and  is_title != 1\
                                         union all \
                                         select     ru.id, ru.taxon_name_id, ru.parent_taxon_name_id \
                                         from       reference_usages ru \
