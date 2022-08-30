@@ -163,7 +163,7 @@ def update_names():
     hybrid_name_list = [str(r[0]) for r in results]
     rows = []
     if name_list:
-        query = f"SELECT rank_id, nomenclature_id, properties, id FROM taxon_names WHERE id IN ({','.join(name_list)})"
+        query = f"SELECT rank_id, nomenclature_id, properties, id, `name` FROM taxon_names WHERE id IN ({','.join(name_list)})"
         conn = pymysql.connect(**db_settings)
         with conn.cursor() as cursor:
             cursor.execute(query)
@@ -172,7 +172,7 @@ def update_names():
             pp = json.loads(r[2])
             if r[0] < 30:  # rank 為屬以上
                 formatted_name = pp.get('latin_name')
-            elif r[0] == 30:  # rank 為屬
+            elif r[0] in [30,31,32,33]:  # rank 為屬
                 if r[1] == 2 and pp.get('is_hybrid_formula'):  # 命名規約為植物且為雜交
                     formatted_name = f"× <i>{pp.get('latin_name')}</i>"
                 else:
@@ -215,6 +215,8 @@ def update_names():
                             formatted_name = f"<i>{np.get('latin_genus')} {np.get('latin_s1')}</i>"
                     for l in pp.get('species_layers'):
                         formatted_name += f" {l.get('rank_abbreviation')} <i>{l.get('latin_name')}</i>"
+            else:
+                formatted_name = r[4]
             rows.append([r[3], formatted_name])
     # 雜交組合最後處理（要等學名已經建立）
     if hybrid_name_list:

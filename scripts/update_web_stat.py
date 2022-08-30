@@ -30,6 +30,7 @@ with conn.cursor() as cursor:
                 SELECT DISTINCT(ru.reference_id) AS id
                 FROM api_taxon_usages atu 
                 JOIN reference_usages ru ON atu.reference_usage_id = ru.id
+                WHERE ru.is_title != 1
                 UNION 
                 SELECT distinct(tn.reference_id) AS id FROM taxon_names tn
                 WHERE tn.reference_id IS NOT NULL) 

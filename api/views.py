@@ -696,7 +696,7 @@ class NameView(APIView):
                     query_taxon_group = f"with recursive cte (id, taxon_name_id, parent_taxon_name_id) as ( \
                                         select     id, taxon_name_id,parent_taxon_name_id \
                                         from       reference_usages \
-                                        where      parent_taxon_name_id = {current_id} and  is_title != 1\
+                                        where      parent_taxon_name_id = {current_id} and  is_title != 1 \
                                         union all \
                                         select     ru.id, ru.taxon_name_id, ru.parent_taxon_name_id \
                                         from       reference_usages ru \
