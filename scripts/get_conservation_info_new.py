@@ -284,5 +284,17 @@ for t in taxon_list:
             cursor.execute(query,c)
             conn.commit()
             conn.close()
+    else:
+        query = f"""
+                INSERT INTO api_conservation
+                (taxon_id)
+                VALUES (%s)
+                """
+        conn = pymysql.connect(**db_settings)        
+        with conn.cursor() as cursor:
+            cursor.execute(query,(t))
+            conn.commit()
+            conn.close()
+
 
 
