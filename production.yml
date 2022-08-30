@@ -9,6 +9,7 @@ services:
     volumes:
       - .:/code
       - ../taicol-volumes/static:/code/conf/static
+      - ../taicol-volumes/data:/code/data
     expose:
       - 8001
     tty: true
