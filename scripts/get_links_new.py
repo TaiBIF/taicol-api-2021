@@ -198,7 +198,12 @@ def get_links(taxon_id, updated=False):
         ncbi_df = results[['name']].merge(ncbi, left_on='name', right_on='source_name')
         for i in ncbi_df.id:
             links += [{'source': 'ncbi', 'suffix': int(i)}]
-    return links
+    # 排除重複
+    final_links = []
+    for l in links:
+        if l not in final_links:
+            final_links.append(l)
+    return final_links
 
 
 
@@ -215,13 +220,14 @@ links = []
 for t in taxon_list:
     print(t)
     l = get_links(t)
-    conn = pymysql.connect(**db_settings)
-    query =  f"""UPDATE api_taxon
-                SET links=%s
-                WHERE taxon_id = '{t}'
-                """
-    with conn.cursor() as cursor:
-        cursor.execute(query, json.dumps(l))
-        conn.commit()
-        conn.close()
+    if l:
+        conn = pymysql.connect(**db_settings)
+        query =  f"""UPDATE api_taxon
+                    SET links=%s
+                    WHERE taxon_id = '{t}'
+                    """
+        with conn.cursor() as cursor:
+            cursor.execute(query, json.dumps(l))
+            conn.commit()
+            conn.close()
 
