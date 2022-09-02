@@ -59,9 +59,11 @@ orthoptera = orthoptera.drop_duplicates()
 flow = pd.read_csv('/code/data/link/flow.csv')
 wsc = pd.read_csv('/code/data/link/wsc.csv')
 
+
 def get_links(taxon_id, updated=False):
     # 需要更新的：nc, irmng, orthoptera, gisd, Amphibian Species of the World
     links = []
+    nm_error = False
     conn = pymysql.connect(**db_settings)
     query = f'SELECT atu.id, tn.name, atu.taxon_id, atu.status, atu.is_latest, atu.taxon_name_id, tn.rank_id \
                 FROM api_taxon_usages atu JOIN taxon_names tn ON atu.taxon_name_id = tn.id \
@@ -98,6 +100,8 @@ def get_links(taxon_id, updated=False):
                     l = {'source': 'col', 'suffix': data['data'][0][0]['results'][0]['accepted_namecode']}
                     if l not in links:
                         links.append(l)
+        else:
+            nm_error = True
     # Orthoptera
     # 先確定是不是直翅目 t010004
     if 't010004' in path:
@@ -203,7 +207,7 @@ def get_links(taxon_id, updated=False):
     for l in links:
         if l not in final_links:
             final_links.append(l)
-    return final_links
+    return final_links, nm_error
 
 
 
@@ -215,11 +219,14 @@ with conn.cursor() as cursor:
     taxon_list = [t[0] for t in  taxon_list]
     conn.close()
 
-links = []
 
 for t in taxon_list:
     print(t)
-    l = get_links(t)
+    l, nm_error = get_links(t)
+    if nm_error:
+        with open("/code/data/nm_error.txt", "a") as file_object:
+            # Append 'hello' at the end of file
+            file_object.write(f",{t}")
     if l:
         conn = pymysql.connect(**db_settings)
         query =  f"""UPDATE api_taxon
