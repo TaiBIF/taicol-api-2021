@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     'api',
     'drf_yasg',
     'rest_framework',
+    "corsheaders",
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -50,12 +51,37 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
+    "corsheaders.middleware.CorsMiddleware",
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
+
+CORS_ALLOWED_ORIGINS = [
+    "http://127.0.0.1:8007",
+    "http://taicol.tw",
+    "https://taicol.tw",
+    "http://127.0.0.1:3000",
+    "http://localhost:3000",
+    "http://taicol.ink.net.tw",
+    "http://tacicol.ink.net.tw:3000",
+    "https://taicol.ink.net.tw",
+    "https://tacicol.ink.net.tw:3000",
+]
+
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https://\w+\.taicol\.tw$",
+    r"^http://\w+\.taicol\.tw$",
+]
+
+CORS_ALLOW_METHODS = [
+    "GET",
+    "POST",
+]
+
+
 
 ROOT_URLCONF = 'conf.urls'
 
