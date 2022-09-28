@@ -69,6 +69,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://tacicol.ink.net.tw:3000",
     "https://taicol.ink.net.tw",
     "https://tacicol.ink.net.tw:3000",
+    "http://taicol.ink.net.tw:3001/",
 ]
 
 CORS_ALLOWED_ORIGIN_REGEXES = [
