@@ -102,7 +102,7 @@ wsc = pd.read_csv('/code/data/link/wsc.csv')
 
 
 def get_links(taxon_id, updated=False):
-    # TODO 如果是更新的話，先把舊的抓回來，然後只更新下列五個來源
+    # 如果是更新的話，先把舊的抓回來，然後只更新下列五個來源
     # 需要更新的：nc, irmng, orthoptera, gisd, Amphibian Species of the World
     links = []
     conn = pymysql.connect(**db_settings)
@@ -437,7 +437,6 @@ def determine_name(df,taxon_id,source, results):
                 if original_name_id == accepted_original_name_id or original_name_id == accepted_name_id:
                     chosen_row = df.loc[tt]
                     chosen_row = chosen_row.to_frame().transpose()
-                    # TODO 如果是這邊的話 不能用chosen_row .values[0]
                     break
     if len(chosen_row):
         if source == 'cites':
@@ -717,7 +716,19 @@ for r in rows:
         conn.commit()
 
 # name_author另外處理
-# TODO 這邊要修改formatted_authors 可能為空
+
+# 取得作者資訊
+query = """SELECT p.last_name, p.abbreviation_name, ptn.taxon_name_id, ptn.order, ptn.role FROM person_taxon_name ptn
+            LEFT JOIN persons p ON ptn.person_id = p.id """
+conn = pymysql.connect(**db_settings)
+with conn.cursor() as cursor:
+    cursor.execute(query)
+    author = cursor.fetchall()
+    author = pd.DataFrame(author)
+    author.columns = ['last_name', 'name_abbr', 'taxon_name_id', 'order', 'role']
+
+
+# 這邊要修改formatted_authors 可能為空
 if name_list:
     query = f"select id, nomenclature_id, rank_id, name, original_taxon_name_id, formatted_authors, publish_year from \
             taxon_names where id in ({','.join(name_list)});"
@@ -727,15 +738,6 @@ if name_list:
         df = cursor.fetchall()
         df = pd.DataFrame(df)
         df.columns = ['taxon_name_id', 'nomenclature_id', 'rank_id', 'name', 'original_taxon_name_id', 'formatted_authors', 'publish_year']
-    # 取得作者資訊
-    query = """SELECT p.last_name, p.abbreviation_name, ptn.taxon_name_id, ptn.order, ptn.role FROM person_taxon_name ptn
-                LEFT JOIN persons p ON ptn.person_id = p.id """
-    conn = pymysql.connect(**db_settings)
-    with conn.cursor() as cursor:
-        cursor.execute(query)
-        author = cursor.fetchall()
-        author = pd.DataFrame(author)
-        author.columns = ['last_name', 'name_abbr', 'taxon_name_id', 'order', 'role']
     df = df.replace({np.nan: None})
     for i in df.index:
         print(i)
@@ -877,162 +879,166 @@ if name_list:
         df.loc[i,'formatted_author'] = author_str.strip()
     df['formatted_author'] = df['formatted_author'].apply(str.strip)
     conn = pymysql.connect(**db_settings)
-    df = df[df.formatted_author!=''].reset_index(drop=True)
     for i in df.index:
         row = df.loc[i]
         print(i)
-        query = f'UPDATE api_names SET name_author = "{row.formatted_author}", updated_at = CURRENT_TIMESTAMP WHERE taxon_name_id = {row.taxon_name_id}'
+        if row.formatted_author:
+            query = f'UPDATE api_names SET name_author = "{row.formatted_author}", updated_at = CURRENT_TIMESTAMP WHERE taxon_name_id = {row.taxon_name_id}'
+        else:
+            query = f'UPDATE api_names SET name_author = NULL, updated_at = CURRENT_TIMESTAMP WHERE taxon_name_id = {row.taxon_name_id}'
         with conn.cursor() as cursor:
             cursor.execute(query)
             conn.commit()
 
 
-
+# --------------------- Taxon更新 --------------------- #
+# --------------------- 學名使用 --------------------- #
 
 # 3 api_taxon_usages
 # 取得所有相關的學名
 def get_related_names(taxon_name_id, df, new_names):
     new_names.remove(taxon_name_id)  # remove current taxon_name_id
-    query = f'''SELECT ru.reference_id, ru.`group`, ru.id, tn.rank_id, ru.status FROM reference_usages ru
-                JOIN taxon_names tn ON ru.taxon_name_id = tn.id
-                WHERE ru.is_title != 1 AND ru.taxon_name_id = {taxon_name_id} AND ru.status NOT IN ("", "undetermined")'''
-    with conn.cursor() as cursor:
-        cursor.execute(query)
-        ref_group_pair = cursor.fetchall()
-    query = f'SELECT ru.taxon_name_id, ru.status FROM reference_usages ru \
-                INNER JOIN taxon_names tn ON ru.taxon_name_id = tn.id  \
-                WHERE ru.status NOT IN ("", "undetermined") AND ru.is_title != 1 '
-    p_query = ''
+    ref_group_pair = ref_group_pair_total[(ref_group_pair_total.taxon_name_id==taxon_name_id)&(ref_group_pair_total.ru_status!='misapplied')]
+    ref_group_pair = ref_group_pair_total.merge(ref_group_pair[['reference_id','group']])
+    ref_group_pair = list(ref_group_pair.itertuples(index=False))
+    names = []
     for p in range(len(ref_group_pair)):
         df = df.append({'ru_id': ref_group_pair[p][2], 'reference_id': ref_group_pair[p][0], 
                     'group': ref_group_pair[p][1], 'taxon_name_id': taxon_name_id, 'rank_id': ref_group_pair[p][3], 'status': ref_group_pair[p][4]}, ignore_index=True)
-        if p < max(range(len(ref_group_pair))):
-            p_query += f' (ru.reference_id = {ref_group_pair[p][0]} AND ru.`group` = {ref_group_pair[p][1]}) OR'
-        else:
-            p_query += f' (ru.reference_id = {ref_group_pair[p][0]} AND ru.`group` = {ref_group_pair[p][1]}) '
-    if p_query:
-        query += f'AND ({p_query})'
-    with conn.cursor() as cursor:
-        cursor.execute(query)
-        names = cursor.fetchall()
-        # names = [l[0] for l in names]
-        new_names += [n[0] for n in names if n[0] not in list(df.taxon_name_id) and n[1] == 'accepted']
+        p_row = ref_group_pair_total[(ref_group_pair_total.reference_id==ref_group_pair[p][0])&(ref_group_pair_total.group==ref_group_pair[p][1])]
+        p_row = p_row[['taxon_name_id','ru_status']]
+        names.append(list(p_row.values[0]))
+    new_names += [n[0] for n in names if n[0] not in list(df.taxon_name_id) and n[1] != 'misapplied']
     return new_names, df
 
 # 選出新增的reference_usages
 # 新增的reference_usages不一定是最新的
+# 2022-12 -> 改成全部都抓
 # 抓出相關的names
 conn = pymysql.connect(**db_settings)
 results = pd.DataFrame()
 
-query = 'select ru.id, ru.reference_id, ru.taxon_name_id, ru.`group`, tn.rank_id, "new" from reference_usages ru \
+# query = 'select ru.id, ru.reference_id, ru.taxon_name_id, ru.`group`, tn.rank_id, "new" from reference_usages ru \
+#          join taxon_names tn ON ru.taxon_name_id = tn.id \
+#          where ru.is_title != 1 and ru.created_at > (select max(updated_at) from api_taxon_usages) \
+#          and JSON_EXTRACT(ru.properties, "$.is_in_taiwan") = 1 and ru.status NOT IN ("", "undetermined");'
+# query = 'select ru.id, ru.reference_id, ru.taxon_name_id, ru.`group`, tn.rank_id from reference_usages ru \
+#          join taxon_names tn ON ru.taxon_name_id = tn.id \
+#          where ru.is_title != 1 \
+#          and JSON_EXTRACT(ru.properties, "$.is_in_taiwan") = 1 and ru.status NOT IN ("", "undetermined");'
+query = 'select ru.id, ru.reference_id, ru.taxon_name_id, ru.`group`, tn.rank_id from reference_usages ru \
          join taxon_names tn ON ru.taxon_name_id = tn.id \
-         where ru.is_title != 1 and ru.created_at > (select max(updated_at) from api_taxon_usages) \
-         and JSON_EXTRACT(ru.properties, "$.is_in_taiwan") = 1 and ru.status NOT IN ("", "undetermined");'
-query = 'select ru.id, ru.reference_id, ru.taxon_name_id, ru.`group`, tn.rank_id, "new", ru.status from reference_usages ru \
-         join taxon_names tn ON ru.taxon_name_id = tn.id \
-         where ru.is_title != 1 and ru.created_at > "2022-08-11" \
-         and JSON_EXTRACT(ru.properties, "$.is_in_taiwan") = 1 and ru.status NOT IN ("", "undetermined");'
-query = 'select ru.id, ru.reference_id, ru.taxon_name_id, ru.`group`, tn.rank_id, "new", ru.status from reference_usages ru \
-         join taxon_names tn ON ru.taxon_name_id = tn.id \
-         where ru.is_title != 1 and ru.id = 88844 \
-         and JSON_EXTRACT(ru.properties, "$.is_in_taiwan") = 1 and ru.status NOT IN ("", "undetermined");'
+         where ru.is_title != 1 \
+         and ru.status NOT IN ("", "undetermined");'
+# query = 'select ru.id, ru.reference_id, ru.taxon_name_id, ru.`group`, tn.rank_id, "new", ru.status from reference_usages ru \
+#          join taxon_names tn ON ru.taxon_name_id = tn.id \
+#          where ru.is_title != 1 and ru.created_at > "2022-08-11" \
+#          and JSON_EXTRACT(ru.properties, "$.is_in_taiwan") = 1 and ru.status NOT IN ("", "undetermined");'
+# query = 'select ru.id, ru.reference_id, ru.taxon_name_id, ru.`group`, tn.rank_id, "new", ru.status from reference_usages ru \
+#          join taxon_names tn ON ru.taxon_name_id = tn.id \
+#          where ru.is_title != 1 and ru.id = 88844 \
+#          and JSON_EXTRACT(ru.properties, "$.is_in_taiwan") = 1 and ru.status NOT IN ("", "undetermined");'
 with conn.cursor() as cursor:
     cursor.execute(query)
     tmp = cursor.fetchall()
-    tmp = pd.DataFrame(tmp, columns=['id','reference_id','taxon_name_id','group', 'rank_id', 'ru_status', "status"])
+    tmp = pd.DataFrame(tmp, columns=['ru_id','reference_id','taxon_name_id','group', 'rank_id'])
     results = results.append(tmp, ignore_index=True)
 
-query = 'select ru.id, ru.reference_id, ru.taxon_name_id, ru.`group`, tn.rank_id, "updated" from reference_usages ru \
-         join taxon_names tn ON ru.taxon_name_id = tn.id \
-         where ru.is_title != 1 and ru.created_at <= (select max(updated_at) from api_taxon_usages) and ru.updated_at > (select max(updated_at) from api_taxon_usages) \
-         and JSON_EXTRACT(ru.properties, "$.is_in_taiwan") = 1 and ru.status NOT IN ("", "undetermined");'
-with conn.cursor() as cursor:
-    cursor.execute(query)
-    tmp = cursor.fetchall()
-    tmp = pd.DataFrame(tmp, columns=['id','reference_id','taxon_name_id','group', 'rank_id', 'ru_status'])
-    results = results.append(tmp, ignore_index=True)
+# query = 'select ru.id, ru.reference_id, ru.taxon_name_id, ru.`group`, tn.rank_id, "updated" from reference_usages ru \
+#          join taxon_names tn ON ru.taxon_name_id = tn.id \
+#          where ru.is_title != 1 \
+#          and JSON_EXTRACT(ru.properties, "$.is_in_taiwan") = 1 and ru.status NOT IN ("", "undetermined");'
+# # query = 'select ru.id, ru.reference_id, ru.taxon_name_id, ru.`group`, tn.rank_id, "updated" from reference_usages ru \
+# #          join taxon_names tn ON ru.taxon_name_id = tn.id \
+# #          where ru.is_title != 1 and ru.created_at <= (select max(updated_at) from api_taxon_usages) and ru.updated_at > (select max(updated_at) from api_taxon_usages) \
+# #          and JSON_EXTRACT(ru.properties, "$.is_in_taiwan") = 1 and ru.status NOT IN ("", "undetermined");'
+# with conn.cursor() as cursor:
+#     cursor.execute(query)
+#     tmp = cursor.fetchall()
+#     tmp = pd.DataFrame(tmp, columns=['id','reference_id','taxon_name_id','group', 'rank_id', 'ru_status'])
+#     results = results.append(tmp, ignore_index=True)
 
 
-checked_name_id = []
+# checked_name_id = []
+# checked_ru_id = []
 count = 0
 total_df = pd.DataFrame()
 conn = pymysql.connect(**db_settings)
+
+
+query = f'''SELECT ru.reference_id, ru.`group`, ru.id, tn.rank_id, ru.status, tn.id FROM reference_usages ru
+            JOIN taxon_names tn ON ru.taxon_name_id = tn.id
+            WHERE ru.is_title != 1 AND ru.status NOT IN ("", "undetermined")'''
+with conn.cursor() as cursor:
+    cursor.execute(query)
+    ref_group_pair_total = cursor.fetchall()
+    ref_group_pair_total = pd.DataFrame(ref_group_pair_total, columns=['reference_id','group','ru_id','rank_id','ru_status','taxon_name_id'] )
+
+# query = f'SELECT ru.taxon_name_id, ru.status FROM reference_usages ru \
+#             INNER JOIN taxon_names tn ON ru.taxon_name_id = tn.id  \
+#             WHERE ru.status NOT IN ("", "undetermined") and ru.is_title != 1 '
+# with conn.cursor() as cursor:
+#     cursor.execute(query)
+#     p_status = cursor.fetchall()
+#     p_status = pd.DataFrame(p_status, columns=['taxon_name_id','ru_status'] )
+
+# 比較taxon_name_Id & ru_id跑出來的結果
 
 for i in results.index:
     if i % 100 == 0:
         print(i)
     row = results.iloc[i]
-    if row.taxon_name_id not in checked_name_id:
-        count += 1
-        tmp_taxon_id = count
-        checked_name_id += [row.taxon_name_id]
-        name_list = [row.taxon_name_id]
-        new_names = []
-        df = pd.DataFrame()
-        # get all reference_id & group
-        # TODO 這邊可以改成query一次就好嗎
-        # 1 找到所有的reference & group
-        query = f'''SELECT ru.reference_id, ru.`group`, ru.id, tn.rank_id, ru.status FROM reference_usages ru
-                    JOIN taxon_names tn ON ru.taxon_name_id = tn.id
-                    WHERE ru.is_title != 1 AND ru.taxon_name_id = {row.taxon_name_id} AND ru.status NOT IN ("", "undetermined")'''
-        with conn.cursor() as cursor:
-            cursor.execute(query)
-            ref_group_pair = cursor.fetchall()
-        # 根據有的 reference_id & group 再去抓抓看有沒有別的name_id (需排除status為空值或未決的資料)
-        # ??? 不確定先移除此處理 -> 如果有其他name_id的話，就有可能是不同rank，需要指定rank
-        # TODO 這邊可以改成query一次就好嗎
-        # 2 找到所有reference & group裡有的學名
-        query = f'SELECT ru.taxon_name_id, ru.status FROM reference_usages ru \
-                    INNER JOIN taxon_names tn ON ru.taxon_name_id = tn.id  \
-                    WHERE ru.status NOT IN ("", "undetermined") and ru.is_title != 1 '
-        p_query = ''
-        for p in range(len(ref_group_pair)):
-            df = df.append({'ru_id': ref_group_pair[p][2], 'reference_id': ref_group_pair[p][0], 'group': ref_group_pair[p]
-                        [1], 'taxon_name_id': row.taxon_name_id, 'rank_id': ref_group_pair[p][3], 'status': ref_group_pair[p][4]}, ignore_index=True)
-            if p < max(range(len(ref_group_pair))):
-                p_query += f' (ru.reference_id = {ref_group_pair[p][0]} AND ru.`group` = {ref_group_pair[p][1]}) OR'
-            else:
-                p_query += f' (ru.reference_id = {ref_group_pair[p][0]} AND ru.`group` = {ref_group_pair[p][1]}) '
-        if p_query:
-            query += f'AND ({p_query})'
-        with conn.cursor() as cursor:
-            cursor.execute(query)
-            names = cursor.fetchall()
-            # names = [l[0] for l in names]
-            # 如果reference & group中有新的學名，且為accepted，則在找他對應的所有reference & group
-            new_names += [n[0] for n in names if n[0] not in name_list and n[1] == 'accepted']  # 用來確定是不是還有name需要跑
-        while len(new_names) > 0:
-            for nn in new_names:
-                checked_name_id += [nn]
-                # TODO 只抓status是accepted的new_names
-                new_names, df = get_related_names(nn, df, new_names)
-        # df = df.astype('int32')
-        # 排除掉related_name中 status是not-accepted的name
-        df = df.drop_duplicates().reset_index()
-        # 目前有些ref group會缺資料，再抓回來
-        final_ref_group_pair = []
+    count += 1
+    tmp_taxon_id = count
+    name_list = [row.taxon_name_id]
+    new_names = []
+    df = pd.DataFrame()
+    # get all reference_id & group
+    # 1 找到所有的reference & group
+    ref_group_pair = ref_group_pair_total[(ref_group_pair_total.taxon_name_id==row.taxon_name_id)&(ref_group_pair_total.ru_status!='misapplied')]
+    ref_group_pair = ref_group_pair_total.merge(ref_group_pair[['reference_id','group']])
+    ref_group_pair = list(ref_group_pair.itertuples(index=False))
+    # 根據有的 reference_id & group 再去抓抓看有沒有別的name_id (需排除status為空值或未決的資料)
+    # 2 找到所有reference & group裡有的學名
+    names = []
+    for p in range(len(ref_group_pair)):
+        df = df.append({'ru_id': ref_group_pair[p][2], 'reference_id': ref_group_pair[p][0], 'group': ref_group_pair[p]
+                    [1], 'taxon_name_id': row.taxon_name_id, 'rank_id': ref_group_pair[p][3], 'status': ref_group_pair[p][4]}, ignore_index=True)
+        p_row = ref_group_pair_total[(ref_group_pair_total.reference_id==ref_group_pair[p][0])&(ref_group_pair_total.group==ref_group_pair[p][1])&(ref_group_pair_total.taxon_name_id==ref_group_pair[p][5])]
+        p_row = p_row[['taxon_name_id','ru_status']]
+        names.append(list(p_row.values[0]))
+    # 如果reference & group中有新的學名，且為accepted，則在找他對應的所有reference & group
+    new_names += [n[0] for n in names if n[0] not in name_list and n[1] != 'misapplied']  # 用來確定是不是還有name需要跑
+    new_names = list(dict.fromkeys(new_names)) # drop duplicates
+    while len(new_names) > 0:
+        for nn in new_names:
+            # 只抓status不是misapplied的new_names
+            new_names, df = get_related_names(nn, df, new_names)
+    # 排除掉related_name中 status是misapplied的name
+    df = df.drop_duplicates().reset_index()
+    # 目前有些ref group會缺資料，再抓回來
+    final_ref_group_pair = []
+    if len(df):
         for f in df[['reference_id','group']].drop_duplicates().index:
             final_ref_group_pair += [(df.iloc[f].reference_id, df.iloc[f].group)]
-        query = f'SELECT ru.id, ru.reference_id, ru.group, ru.taxon_name_id, tn.rank_id, ru.status FROM reference_usages ru \
-                    INNER JOIN taxon_names tn ON ru.taxon_name_id = tn.id  \
-                    WHERE ru.status NOT IN ("", "undetermined") and ru.is_title != 1 '
-        p_query = ''
-        for p in range(len(final_ref_group_pair)):
-            if p < max(range(len(final_ref_group_pair))):
-                p_query += f' (ru.reference_id = {final_ref_group_pair[p][0]} AND ru.`group` = {final_ref_group_pair[p][1]}) OR'
+    final_df = pd.DataFrame()
+    for p in range(len(final_ref_group_pair)):
+        p_row = ref_group_pair_total[(ref_group_pair_total.reference_id==final_ref_group_pair[p][0])&(ref_group_pair_total.group==final_ref_group_pair[p][1])]
+        p_row = p_row[['ru_id','reference_id','group','taxon_name_id','rank_id','ru_status']]
+        final_df = final_df.append(p_row)       
+    # 如果ref & group已存在在其他tmp_taxon_id，則納入該tmp_taxon_id分類群
+    if len(final_df):
+        check_if_taxon_id = pd.DataFrame()
+        if len(total_df):
+            check_if_taxon_id = total_df.merge(final_df)
+        if len(check_if_taxon_id):
+            if len(check_if_taxon_id.tmp_taxon_id.unique()) == 1:
+                final_df['tmp_taxon_id'] = check_if_taxon_id.tmp_taxon_id.unique()[0]
             else:
-                p_query += f' (ru.reference_id = {final_ref_group_pair[p][0]} AND ru.`group` = {final_ref_group_pair[p][1]}) '
-        if p_query:
-            query += f'AND ({p_query})'
-        with conn.cursor() as cursor:
-            cursor.execute(query)
-            final_df = cursor.fetchall()
-            final_df = pd.DataFrame(final_df, columns=['ru_id', 'reference_id', 'group', 'taxon_name_id', 'rank_id', 'status'])
-            # TODO 根據 reference / group 分組
-            # TODO 檢查如果沒有misapplied的情況
-            # 同一個taxon_id的條件 -> 1 同一組 ref & group, 2 有一樣的name?
-        final_df['tmp_taxon_id'] = tmp_taxon_id
+                print('noooooo')
+                break
+        else:
+            final_df['tmp_taxon_id'] = tmp_taxon_id
         total_df = total_df.append(final_df, ignore_index=True)
 
 total_df = total_df.drop_duplicates() # 155
@@ -1045,8 +1051,9 @@ total_df = total_df.drop_duplicates() # 155
 conn = pymysql.connect(**db_settings)
 
 results = pd.DataFrame()
-query = f"""SELECT id, publish_year, JSON_EXTRACT(properties, "$.doi") FROM `references` 
-            WHERE id IN ({str(total_df.reference_id.to_list()).replace('[','').replace(']','')})"""
+# query = f"""SELECT id, publish_year, JSON_EXTRACT(properties, "$.doi") FROM `references` 
+#             WHERE id IN ({str(total_df.reference_id.to_list()).replace('[','').replace(']','')})"""
+query = f"""SELECT id, publish_year, JSON_EXTRACT(properties, "$.doi") FROM `references` """
 
 with conn.cursor() as cursor:
     cursor.execute(query)
@@ -1059,8 +1066,9 @@ total_df = total_df.merge(results)
 
 # str(list(total_df.ru_id.unique())).replace('[','').replace(']','')
 
-query = f"""SELECT id, status, taxon_name_id, parent_taxon_name_id FROM reference_usages 
-          WHERE id IN ({str(list(total_df.ru_id.to_list())).replace('[','').replace(']','')})"""
+query = f"""SELECT id, status, taxon_name_id, parent_taxon_name_id FROM reference_usages"""
+# query = f"""SELECT id, status, taxon_name_id, parent_taxon_name_id FROM reference_usages 
+#           WHERE id IN ({str(list(total_df.ru_id.to_list())).replace('[','').replace(']','')})"""
 
 with conn.cursor() as cursor:
     cursor.execute(query)
@@ -1079,10 +1087,24 @@ total_df['taxon_status'] = ''
 total_df['is_latest'] = False
 total_df['publish_date'] = ''
 
+total_df.loc[total_df.reference_id==328,'publish_date'] = '2021-01-06'
+total_df.loc[total_df.reference_id==336,'publish_date'] = '2021-09-03'
+total_df.loc[total_df.reference_id==612,'publish_date'] = '2015-12-01'
+total_df.loc[total_df.reference_id==674,'publish_date'] = '2015-05-15'
+total_df.loc[total_df.reference_id==90,'publish_date'] = '2019-10-25'
+total_df.loc[total_df.reference_id==87,'publish_date'] = '2019-02-28'
+total_df.loc[total_df.reference_id==269,'publish_date'] = '1999-01-13'
+
+# 153, 328(2021-01-06), 336(2021-09-03), 612 (2015-12-01), 674(2015-05-15),  90(2019-10-25),  87 (2019-02-28), 269 (1999-01-13)
+
 cannot_decide = []
 for t in taxon_list:
-    print(t)
+    if t % 1000 == 0:
+        print(t)
     temp = total_df[total_df['tmp_taxon_id'] == t]
+    # 如果有文獻的話就忽略backbone
+    if not all(temp.reference_id==153):
+        temp = temp[temp.reference_id!=153]
     # 如果有大於一個reference_id, 比較年份
     yr = temp[['reference_id', 'publish_year']].drop_duplicates()
     max_yr = yr.publish_year.max()
@@ -1093,23 +1115,31 @@ for t in taxon_list:
             ref_list.remove(153)
             chosen_ref_id = ref_list[0]
             total_df.loc[(total_df['tmp_taxon_id'] == t) & (total_df['reference_id'] == chosen_ref_id), 'is_latest'] = True
+        elif len(yr[yr['publish_year'] == max_yr]) == 2 and 813 in ref_list:
+            # 代表和autonym backbone同年份，優先選擇非autonym backbone的文獻
+            ref_list.remove(813)
+            chosen_ref_id = ref_list[0]
+            total_df.loc[(total_df['tmp_taxon_id'] == t) & (total_df['reference_id'] == chosen_ref_id), 'is_latest'] = True
         else:
-            for d in temp.doi.unique():
+            for d in temp[temp.publish_date!=''].doi.unique():
+                date_list = []
                 if d:
                     d_str = d.replace('"', '').replace("'", '')
-                    url = f'https://api.crossref.org/works/{d_str}'
-                    result = requests.get(url)
-                    if result.status_code == 200:
-                        result = result.json()
-                        if result.get('message'):
-                            try:
-                                date_list = result.get('message').get('published-print').get('date-parts')[0]
-                            except:
-                                date_list = result.get('message').get('published-online').get('date-parts')[0]
-                            try:
-                                total_df.loc[total_df['doi'] == d, 'publish_date'] = datetime(date_list[0], date_list[1], date_list[2]).strftime("%Y-%m-%d")
-                            except:
-                                pass
+                    if d_str:
+                        url = f'https://api.crossref.org/works/{d_str}'
+                        result = requests.get(url)
+                        if result.status_code == 200:
+                            result = result.json()
+                            if result:
+                                if result.get('message'):
+                                    try:
+                                        date_list = result.get('message').get('published-print').get('date-parts')[0]
+                                    except:
+                                        pass
+                                    try:
+                                        total_df.loc[total_df['doi'] == d, 'publish_date'] = datetime(date_list[0], date_list[1], date_list[2]).strftime("%Y-%m-%d")
+                                    except:
+                                        pass
             temp = total_df[total_df['tmp_taxon_id'] == t]
             dt = temp[['reference_id', 'publish_date']].drop_duplicates()
             max_dt = dt.publish_date.max()
@@ -1120,6 +1150,11 @@ for t in taxon_list:
                     ref_list.remove(153)
                     chosen_ref_id = ref_list[0]
                     total_df.loc[(total_df['tmp_taxon_id'] == t) & (total_df['reference_id'] == chosen_ref_id), 'is_latest'] = True
+                elif len(yr[yr['publish_year'] == max_yr]) == 2 and 813 in ref_list:
+                    # 代表和autonym backbone同年份，優先選擇非autonym backbone的文獻
+                    ref_list.remove(813)
+                    chosen_ref_id = ref_list[0]
+                    total_df.loc[(total_df['tmp_taxon_id'] == t) & (total_df['reference_id'] == chosen_ref_id), 'is_latest'] = True
                 else:
                     cannot_decide += [t]
             else:
@@ -1128,10 +1163,32 @@ for t in taxon_list:
             # 如果年份一樣，比對publish_date，但如果無法取得publish_date?
             # 也排除ref=153的情況？
     else:
-        total_df.loc[(total_df['tmp_taxon_id'] == t) & (total_df['publish_year'] == max_yr), 'is_latest'] = True
+        # 這裡也要排除153
+        if not all(total_df.loc[(total_df['tmp_taxon_id'] == t) & (total_df['publish_year'] == max_yr), 'reference_id']==153):
+            total_df.loc[(total_df['tmp_taxon_id'] == t) & (total_df['publish_year'] == max_yr) & (total_df['reference_id'] != 153), 'is_latest'] = True
+        else:
+            total_df.loc[(total_df['tmp_taxon_id'] == t) & (total_df['publish_year'] == max_yr), 'is_latest'] = True
 
+
+print(cannot_decide)
+# 如果自己的group裡面有misapplied，且該misapplied已有taxon，要把對方的tmp_taxon_id改為自己
+
+for tti in total_df.tmp_taxon_id.unique():
+    if tti % 100 == 0:
+        print(tti)
+    rows = total_df[total_df.tmp_taxon_id==tti]
+    for m in rows[(rows.is_latest==True)&(rows.ru_status=='misapplied')].taxon_name_id:
+        if len(total_df[(total_df.taxon_name_id==m)&(total_df.ru_status=='accepted')&(total_df.is_latest==True)]):
+            for ttti in total_df[(total_df.taxon_name_id==m)&(total_df.ru_status=='accepted')&(total_df.is_latest==True)].tmp_taxon_id:
+                print(ttti, tti)
+                total_df.loc[total_df.tmp_taxon_id==ttti,'tmp_taxon_id'] = tti
 
 # 有misapplied的情況下，同一個taxon_name_id會對到不同taxon
+
+# 85285 46265
+# 85295 63493
+# 2681 85427
+# 41526 85550
 
 for i in total_df.index:
     if i % 1000 == 0:
@@ -1155,17 +1212,45 @@ for i in total_df.index:
                 # 如果不一樣，且不是misapplied, 設成not-accepted
                 total_df.loc[i, 'taxon_status'] = 'not-accepted'
 
+
 # 先看目前的name有沒有對應的taxon_id
 # 一個name只會對應到一個taxon -> 不會!!
 conn = pymysql.connect(**db_settings)
 
-query = f"SELECT reference_usage_id, taxon_id FROM api_taxon_usages WHERE reference_usage_id IN {str(total_df.ru_id.to_list()).replace('[','(').replace(']',')')}"
+# query = f"SELECT reference_usage_id, taxon_id FROM api_taxon_usages WHERE reference_usage_id IN {str(total_df.ru_id.to_list()).replace('[','(').replace(']',')')}"
+query = f"SELECT reference_usage_id, taxon_id FROM api_taxon_usages"
 with conn.cursor() as cursor:
     cursor.execute(query)
     db = cursor.fetchall()
     db = pd.DataFrame(db, columns=['ru_id', 'taxon_id'])
 
 total_df = total_df.merge(db, how='left')
+
+
+total_df.to_csv('total_df_1229.csv',index=None)
+
+# 85308
+
+# db[~db.ru_id.isin(total_df.ru_id)]
+
+
+# check_a = total_df[['reference_id','group' ,'tmp_taxon_id']]
+# check_a['rg'] = check_a.apply(lambda x: str(x['reference_id']) + '_' + str(x['group']), axis=1)
+# check_a = check_a[['rg','tmp_taxon_id']]
+# check_a = check_a.drop_duplicates()
+
+# check_1_count = check_a.groupby('rg').count()
+# check_a[check_a.groupby('rg').count() > 1]
+
+# 每一個reference_id和group都只會對到一個taxon_id嗎?
+# t085281 不見了
+
+# --------------------------------------------------- #
+# 從這邊可以知道哪些是原本就有taxonID的情況 #
+# --------------------------------------------------- #
+
+
+
 # total_df.to_csv('test.csv', index=None)
 
 # 更新 api_taxon_usages & api_taxon & api_taxon_history & api_taxon_tree
@@ -1413,9 +1498,9 @@ for nt in new_taxon_list:
 
 check = total_df[(total_df.tmp_taxon_id.isin(old_tmp_taxon_list))&total_df.taxon_id.notnull()][['tmp_taxon_id', 'taxon_id']]
 check = check.drop_duplicates()
-# * 物種合併：新文獻中，兩筆(或以上)Taxon id 出現在同一個分類群裡
+# * check_1_count 物種合併：新文獻中，兩筆(或以上)Taxon id 出現在同一個分類群裡
 check_1_count = check.groupby('tmp_taxon_id').count()
-# * 物種拆分：新文獻中，同一筆Taxon id 同時出現在兩個(或以上)分類群裡
+# * check_2_count 物種拆分：新文獻中，同一筆Taxon id 同時出現在兩個(或以上)分類群裡
 check_2_count = check.groupby('taxon_id').count()
 
 
@@ -1444,7 +1529,7 @@ if all(check_1_count==1) and all(check_2_count==1):
             # 代表有新的文獻
             for i in total_df[(total_df['tmp_taxon_id']==t)&(~total_df['reference_id'].isin(current_ref))].reference_id:
                 # TODO 這邊一個reference_id可能會多到多個reference_usage_id 不確定會不會有問題
-                if i != 153: # backbone不算
+                if i not in [153, 813]: # backbone不算
                     ru = total_df[(total_df['tmp_taxon_id'] == t) & (total_df['reference_id'] == i)].ru_id.to_list()[0]
                     query = f"INSERT INTO api_taxon_history (type, taxon_id, note, reference_usage_id ) \
                             VALUES (%s, %s, %s, %s)"
@@ -2098,3 +2183,54 @@ for r in results:
                 cursor.execute(query)
                 conn.commit()
 
+# 高階層 (<34) 的 alien_type
+# 從下層往上抓
+# 如果只有cultured 階層的alien_type就給cultured
+
+# naturalized
+# native
+# invasive
+# cultured
+# NULL
+
+
+# get all taxon rank < 34
+conn = pymysql.connect(**db_settings)
+query = """
+SELECT taxon_id FROM api_taxon WHERE rank_id < 34;
+"""
+with conn.cursor() as cursor:
+    cursor.execute(query)
+    taxon = cursor.fetchall()
+
+
+query = """
+SELECT at.taxon_id, at.alien_type, att.path, at.rank_id 
+FROM api_taxon at
+JOIN api_taxon_tree att ON att.taxon_id = at.taxon_id
+WHERE at.rank_id >= 34;
+"""
+with conn.cursor() as cursor:
+    cursor.execute(query)
+    sp = cursor.fetchall()
+    sp = pd.DataFrame(sp, columns=['taxon_id','alien_type','path','rank_id'])
+
+
+h_cultured = []
+for t in taxon:
+    taxon_id = t[0]
+    type_list = list(sp[sp['path'].str.contains(taxon_id)].alien_type.unique())
+    if type_list == ['cultured']:
+        h_cultured.append(taxon_id)
+
+conn = pymysql.connect(**db_settings)
+for h in h_cultured:
+    # print(h)
+    query = f"UPDATE api_taxon SET alien_type = 'cultured' WHERE taxon_id = '{h}'"
+    with conn.cursor() as cursor:
+        cursor.execute(query)
+        conn.commit()
+
+# TODO 未來更新的時候要考慮可能有階層從cultured改為非cultured
+
+# (sp['path'].str.contains(taxon_id)).any()
