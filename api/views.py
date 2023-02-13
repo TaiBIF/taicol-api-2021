@@ -21,8 +21,7 @@ from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 from rest_framework.schemas import AutoSchema
 
-from api.utils import rank_map_c, rank_map, update_citations, update_names
-
+from api.utils import rank_map_c, rank_map
 import requests
 
 db_settings = {
