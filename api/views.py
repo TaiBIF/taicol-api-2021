@@ -637,9 +637,9 @@ class NameView(APIView):
             taxon_group = request.GET.get('taxon_group', '').strip()
             limit = 300 if limit > 300 else limit  # 最大值 300
 
-            # update names
-            update_names()
-            update_citations()
+            # # update names
+            # update_names()
+            # update_citations()
 
             # print(name_id, scientific_name, updated_at, created_at, taxon_group)
             conn = pymysql.connect(**db_settings)
