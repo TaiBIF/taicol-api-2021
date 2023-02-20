@@ -21,7 +21,7 @@ from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 from rest_framework.schemas import AutoSchema
 
-from api.utils import rank_map_c, rank_map
+from api.utils import rank_map_c, rank_map, lin_map, lin_ranks
 import requests
 
 db_settings = {
@@ -214,21 +214,22 @@ class ReferencesView(APIView):
             response = {"status": {"code": 400, "message": "Bad Request: Unsupported parameters"}}
             return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
         try:
-            df = pd.DataFrame(columns=['reference_id', 'citation', 'status', 'indications', 'is_taiwan', 'is_endemic', 'alien_type'])
+            # NOTE 這邊的alien_type是reference_usage的 不是taxon的
+            df = pd.DataFrame(columns=['reference_id', 'citation', 'status', 'indications', 'is_in_taiwan', 'is_endemic', 'alien_type'])
             if name_id := request.GET.get('name_id'):
                 query = f"SELECT ru.reference_id, CONCAT_WS(' ' ,c.author, c.content), ru.status, ru.properties->>'$.indications', \
                          JSON_EXTRACT(ru.properties, '$.is_in_taiwan'), JSON_EXTRACT(ru.properties, '$.is_endemic'), ru.properties->>'$.alien_type' \
                          FROM reference_usages ru \
                          JOIN `references` r ON ru.reference_id = r.id \
                          JOIN api_citations c ON ru.reference_id = c.reference_id \
-                         WHERE ru.taxon_name_id = {name_id} and r.id != 153 and ru.status != '' and ru.is_title != 1 "  # 不給TaiCOL backbone
+                         WHERE ru.taxon_name_id = %s and r.type != 4 and ru.status != '' and ru.is_title != 1 "  # 不給TaiCOL backbone
                 conn = pymysql.connect(**db_settings)
                 with conn.cursor() as cursor:
-                    cursor.execute(query)
-                    df = pd.DataFrame(cursor.fetchall(), columns=['reference_id', 'citation', 'status', 'indications', 'is_taiwan', 'is_endemic', 'alien_type'])
+                    cursor.execute(query, (name_id,))
+                    df = pd.DataFrame(cursor.fetchall(), columns=['reference_id', 'citation', 'status', 'indications', 'is_in_taiwan', 'is_endemic', 'alien_type'])
                     df = df.replace({np.nan: None})
                     if len(df):
-                        is_list = ['is_endemic', 'is_taiwan']
+                        is_list = ['is_endemic', 'is_in_taiwan']
                         df[is_list] = df[is_list].replace({0: False, 1: True, '0': False, '1': True})
                         for i in df.index:
                             row = df.iloc[i]
@@ -247,7 +248,7 @@ class ReferencesView(APIView):
                     for r in results:
                         if r[0] not in df.reference_id.to_list():
                             df = df.append({'reference_id': r[0], 'citation': r[1], 'status': None,
-                                            'indications': None, 'is_taiwan': None, 'is_endemic': None, 'alien_type': None}, ignore_index=True)
+                                            'indications': None, 'is_in_taiwan': None, 'is_endemic': None, 'alien_type': None}, ignore_index=True)
             response = {"status": {"code": 200, "message": "Success"},
                         "info": {"total": len(df)}, "data": df.to_dict('records')}
         except Exception as er:
@@ -286,26 +287,49 @@ class HigherTaxaView(APIView):
             if taxon_id := request.GET.get('taxon_id'):
                 # 分成兩階段 先抓回path，再去抓name
                 conn = pymysql.connect(**db_settings)
-                query = f"SELECT path FROM api_taxon_tree WHERE taxon_id = '{taxon_id}'"
-                path = ''
+                query = f"""SELECT at.rank_id, att.path FROM api_taxon_tree att
+                            JOIN api_taxon at ON at.taxon_id = att.taxon_id
+                             WHERE att.taxon_id = %s"""
+                info = ''
                 with conn.cursor() as cursor:
-                    cursor.execute(query)
-                    path = cursor.fetchone()
-                if path:
-                    path = path[0].split('>')              
+                    cursor.execute(query, (taxon_id,))
+                    info = cursor.fetchone()
+
+                if info:
+                    path = info[1].split('>')              
                     query = f"SELECT t.taxon_id, t.accepted_taxon_name_id, tn.name, \
                             an.name_author, an.formatted_name, t.rank_id, t.common_name_c \
                             FROM api_taxon t \
                             JOIN taxon_names tn ON t.accepted_taxon_name_id = tn.id \
                             JOIN api_names an ON t.accepted_taxon_name_id = an.taxon_name_id \
-                            WHERE t.taxon_id IN ({str(path).replace('[','').replace(']','')}) \
+                            WHERE t.taxon_id IN %s \
                             ORDER BY t.rank_id DESC"
                     with conn.cursor() as cursor:
-                        cursor.execute(query)
-                        results = cursor.fetchall()
-                        for r in results:
-                            data += [{'taxon_id': r[0], 'name_id': r[1], 'simple_name': r[2], 'name_author': r[3], 'formatted_name': r[4],
-                                    'rank': rank_map[r[5]], 'common_name_c': r[6]}]
+                        cursor.execute(query, (path,))
+                        higher = cursor.fetchall()
+                        higher = pd.DataFrame(higher, columns=['taxon_id','name_id','simple_name','name_author',
+                                                'formatted_name','rank_id','common_name_c'])
+                    # 補上階層未定 
+                    # 先找出應該要有哪些林奈階層
+                    current_ranks = higher.rank_id.to_list() + [info[0]]
+                    for x in lin_map.keys():
+                        if x not in current_ranks and x < max(current_ranks) and x > min(current_ranks):
+                            higher = pd.concat([higher, pd.Series({'rank_id': x, 'common_name_c': '地位未定', 'taxon_id': None, 
+                                                                   'name_id': None, 'name_author': None }).to_frame().T], ignore_index=True)
+                    # 從最大的rank開始補
+                    higher = higher.sort_values('rank_id', ignore_index=True, ascending=False)
+                    for hi in higher[higher.taxon_id.isnull()].index:
+                        found_hi = hi + 1
+                        while not higher.loc[found_hi].taxon_id:
+                            found_hi += 1
+                        higher.loc[hi, 'formatted_name'] = f'{higher.loc[found_hi].formatted_name} {lin_map[higher.loc[hi].rank_id]} incertae sedis'
+                        higher.loc[hi, 'simple_name'] = f'{higher.loc[found_hi].simple_name} {lin_map[higher.loc[hi].rank_id]} incertae sedis'
+                    # higher = higher.replace({'': None, np.nan: None})
+                    higher['rank'] = higher['rank_id'].apply(lambda x: rank_map[x])
+                    higher['name_id'] = higher['name_id'].astype(int, errors='ignore')
+
+                    data = higher[['taxon_id','name_id','simple_name','name_author','formatted_name','rank','common_name_c']].to_dict(orient='records')
+
             response = {"status": {"code": 200, "message": "Success"},
                         "data": data}
         except Exception as er:
@@ -460,7 +484,9 @@ class TaxonView(APIView):
                     elif var == 'false':
                         conditions += [f"{i} = 0"]
                 if var := request.GET.get('alien_type', '').strip():
-                    conditions += [f"t.alien_type = '{var}'"]
+                    # conditions += [f"t.alien_type = '{var}'"]
+                    conditions += [''' AND JSON_CONTAINS(t.alien_type, '{"alien_type":"''' + var + '''"}')  > 0''']
+
                 if updated_at:
                     if not validate(updated_at):
                         response = {"status": {"code": 400, "message": "Bad Request: Incorrect DATE(updated_at) value"}}
@@ -520,7 +546,7 @@ class TaxonView(APIView):
                 # 0, 1 要轉成true, false (但可能會有null)
                 if len(df):
                     df = df.replace({np.nan: None})
-                    is_list = ['is_hybrid', 'is_endemic', 'is_fossil', 'is_terrestrial', 'is_freshwater', 'is_brackish', 'is_marine']
+                    is_list = ['is_in_taiwan','is_hybrid', 'is_endemic', 'is_fossil', 'is_terrestrial', 'is_freshwater', 'is_brackish', 'is_marine']
                     df[is_list] = df[is_list].replace({0: False, 1: True, '0': False, '1': True})
                     # 階層
                     df['rank'] = df['rank'].apply(lambda x: rank_map[x])
@@ -551,8 +577,17 @@ class TaxonView(APIView):
                     df = df[['taxon_id', 'name_id', 'simple_name', 'name_author', 'formatted_name', 'synonyms', 'formatted_synonyms', 'misapplied', 'formatted_misapplied',
                             'rank', 'common_name_c', 'alternative_name_c', 'is_hybrid', 'is_endemic', 'alien_type', 'is_fossil', 'is_terrestrial', 'is_freshwater', 'is_brackish',
                              'is_marine', 'cites', 'iucn', 'redlist', 'protected', 'sensitive', 'created_at', 'updated_at']]
-                    df['cites'] = df['cites'].apply(lambda x: x.replace('1','I').replace('2','II').replace('3','III') if x else x)
 
+                    for i in df.index:
+                        row = df.iloc[i]
+                        if row.alien_type:
+                            alt_list = []
+                            for at in json.loads(row.alien_type):
+                                if at.get('alien_type') not in alt_list:
+                                    alt_list.append(at.get('alien_type'))
+                            df.loc[i, 'alien_type'] = ','.join(alt_list)
+
+                    df['cites'] = df['cites'].apply(lambda x: x.replace('1','I').replace('2','II').replace('3','III') if x else x)
 
                 # 加上其他欄位
                 response = {"status": {"code": 200, "message": "Success"},
