@@ -14,7 +14,7 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
-from django.urls import path
+from django.urls import path, include
 from django.conf.urls import url
 from api import views as api_view
 
@@ -27,8 +27,8 @@ from drf_yasg import openapi
 schema_view = get_schema_view(
     openapi.Info(
         title="TaiCOL API",
-        default_version='v1',
-        description="開發測試",
+        default_version='v2',
+        description="TaiCOL API說明文件",
         #   terms_of_service="https://www.google.com/policies/terms/",
         #   contact=openapi.Contact(email="contact@snippets.local"),
         #   license=openapi.License(name="BSD License"),
@@ -40,11 +40,13 @@ schema_view = get_schema_view(
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('v1/name', api_view.NameView.as_view()),
-    path('v1/taxon', api_view.TaxonView.as_view()),
-    path('v1/higherTaxa', api_view.HigherTaxaView.as_view()),
-    path('v1/references', api_view.ReferencesView.as_view()),
-    path('v1/nameMatch', api_view.NameMatchView.as_view()),
+    path('name', api_view.NameView.as_view()),
+    path('taxon', api_view.TaxonView.as_view()),
+    path('higherTaxa', api_view.HigherTaxaView.as_view()),
+    path('references', api_view.ReferencesView.as_view()),
+    path('nameMatch', api_view.NameMatchView.as_view()),
+    path('namecode', api_view.NamecodeView.as_view()),
+    path('taxonVersion', api_view.TaxonVersionView.as_view()),
     url(r'^swagger(?P<format>\.json|\.yaml)$', schema_view.without_ui(cache_timeout=0), name='schema-json'),
     url(r'^swagger/$', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
     url(r'^redoc/$', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
