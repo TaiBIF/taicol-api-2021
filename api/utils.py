@@ -43,7 +43,7 @@ redlist_map = {
 
 cites_map = { 'I': '1','II':'2','III':'3','NC':'NC'}
 
-protected_map = {'第一級': 'I', '第二級': 'II', '第三級': 'III', '無': 'none'}
+protected_map = {'第一級': 'I', '第二級': 'II', '第三級': 'III'}
 
 
 rank_map = {

@@ -145,9 +145,9 @@ class TaxonVersionView(APIView):
                     first = cursor.fetchone()
                     if first:
                         if first[3] != 4: # 如果不是backbone
-                            data.append({'taxon_id': taxon_id, 'name_id': json.loads(first[0]).get('taxon_name_id'), 'reference_id': first[2], 'updated_at': first[1]})
+                            data.append({'taxon_id': taxon_id, 'name_id': int(json.loads(first[0]).get('taxon_name_id')), 'reference_id': first[2], 'updated_at': first[1]})
                         else:
-                            data.append({'taxon_id': taxon_id, 'name_id': json.loads(first[0]).get('taxon_name_id'), 'reference_id': None, 'updated_at': first[1]})
+                            data.append({'taxon_id': taxon_id, 'name_id': int(json.loads(first[0]).get('taxon_name_id')), 'reference_id': None, 'updated_at': first[1]})
                 with conn.cursor() as cursor:     
                     query = f'''SELECT ath.note, DATE_FORMAT(ath.updated_at, "%%Y-%%m-%%d"), ru.reference_id, r.type FROM api_taxon_history ath
                                 LEFT JOIN reference_usages ru ON ath.reference_usage_id = ru.id
@@ -158,9 +158,9 @@ class TaxonVersionView(APIView):
                 if nids:
                     for n in nids:
                         if n[3] != 4:
-                            data.append({'taxon_id': taxon_id, 'name_id': json.loads(n[0]).get('new_taxon_name_id'), 'reference_id': n[2], 'updated_at': n[1]})
+                            data.append({'taxon_id': taxon_id, 'name_id': int(json.loads(n[0]).get('new_taxon_name_id')), 'reference_id': n[2], 'updated_at': n[1]})
                         else:
-                            data.append({'taxon_id': taxon_id, 'name_id': json.loads(n[0]).get('new_taxon_name_id'), 'reference_id': None, 'updated_at': n[1]})
+                            data.append({'taxon_id': taxon_id, 'name_id': int(json.loads(n[0]).get('new_taxon_name_id')), 'reference_id': None, 'updated_at': n[1]})
 
             # elif namecode := request.GET.getlist('namecode'):
             #     conn = pymysql.connect(**db_settings)       
@@ -704,61 +704,43 @@ class TaxonView(APIView):
 
                 # 保育資訊
                 if cs := request.GET.getlist('redlist'):
-                    c = 1
+                    cs_list = []
                     for css in cs:
-                        if c == 1:
-                            c_str = f'ac.red_category = "{redlist_map[css]}"'
-                        else:
-                            c_str += f' OR ac.red_category = "{redlist_map[css]}"'
-                        c += 1
-                    if 'OR' in c_str:
-                        c_str = f"({c_str})"
-                    else:
-                        c_str = f"{c_str}"
-                    conditions += [c_str]
+                        cs_list.append(f'ac.red_category = "{css}"')
+                    if cs_list:
+                        conditions.append(f"({' OR '.join(cs_list)})")
 
                 if cs := request.GET.getlist('protected'):
-                    c = 1
+                    cs_list = []
                     for css in cs:
-                        if c == 1:
-                            c_str = f'ac.protected_category = "{protected_map[css]}"'
+                        if css == 'NULL':
+                            cs_list.append(f'ac.protected_category IS NULL')
                         else:
-                            c_str += f' OR ac.protected_category = "{protected_map[css]}"'
-                        c += 1
-                    if 'OR' in c_str:
-                        c_str = f"({c_str})"
-                    else:
-                        c_str = f"{c_str}"
-                    conditions += [c_str]
+                            cs_list.append(f'ac.protected_category = "{css}"')
+                    if cs_list:
+                        conditions.append(f"({' OR '.join(cs_list)})")
 
                 if cs := request.GET.getlist('iucn'):
-                    c = 1
+                    cs_list = []
                     for css in cs:
-                        if c == 1:
-                            c_str = f'ac.iucn_category = "{css}"'
-                        else:
-                            c_str += f' OR ac.iucn_category = "{css}"'
-                        c += 1
-                    if 'OR' in c_str:
-                        c_str = f"({c_str})"
-                    else:
-                        c_str = f"{c_str}"
-                    conditions += [c_str]
+                        # if css == 'NULL':
+                        #     cs_list.append(f'ac.iucn_category IS NULL')
+                        # else:
+                        cs_list.append(f'ac.iucn_category = "{css}"')
+                    if cs_list:
+                        conditions.append(f"({' OR '.join(cs_list)})")
 
                 # CITES類別要用like
                 if cs := request.GET.getlist('cites'):
-                    c = 1
+                    cs_list = []
                     for css in cs:
-                        if c == 1:
-                            c_str = f'ac.cites_listing like "%{cites_map[css]}%"'
+                        if css == 'NULL':
+                            cs_list.append(f'ac.cites_listing IS NULL')
                         else:
-                            c_str += f' OR ac.cites_listing like "%{cites_map[css]}%"'
-                        c += 1
-                    if 'OR' in c_str:
-                        c_str = f"({c_str})"
-                    else:
-                        c_str = f"{c_str}"
-                    conditions += [c_str]
+                            cs_list.append(f'ac.cites_listing like "%{css}%"')
+                    if cs_list:
+                        c_str = f" AND ({' OR '.join(cs_list)})"
+                        conditions.append(c_str)
 
                 if taxon_group:
                     # 先抓taxon_id再判斷有沒有其他condition要考慮
