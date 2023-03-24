@@ -872,6 +872,12 @@ class NameView(APIView):
                 type=openapi.TYPE_STRING
             ),
             openapi.Parameter(
+                name='rank',
+                in_=openapi.IN_QUERY,
+                description='階層',
+                type=openapi.TYPE_STRING
+            ),
+            openapi.Parameter(
                 name='created_at',
                 in_=openapi.IN_QUERY,
                 description='建立日期',
@@ -906,7 +912,7 @@ class NameView(APIView):
             print(er)
             limit, offset = 20, 0  # 如果有錯的話直接改成預設值
         try:
-            if request.GET.keys() and not set(list(request.GET.keys())) <= set(['name_id', 'scientific_name', 'common_name', 'updated_at', 'created_at', 'taxon_group', 'limit', 'offset']):
+            if request.GET.keys() and not set(list(request.GET.keys())) <= set(['name_id', 'scientific_name', 'common_name', 'rank', 'updated_at', 'created_at', 'taxon_group', 'limit', 'offset']):
                 response = {"status": {"code": 400, "message": "Bad Request: Unsupported parameters"}}
                 return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
             # 如果有重複的參數，只考慮最後面的那個 (default)
@@ -948,6 +954,14 @@ class NameView(APIView):
                     response = {"status": {"code": 400, "message": "Bad Request: Incorrect DATE(created_at) value"}}
                     return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
                 conditions += [f"date(tn.created_at) > '{created_at}'"]
+
+            if rank := request.GET.get('rank'):
+                try:
+                    rank_id = list(rank_map.keys())[list(rank_map.values()).index(rank)]
+                    conditions += [f'tn.rank_id = {rank_id}']
+                except:
+                    response = {"status": {"code": 400, "message": "Bad Request: Incorrect rank"}}
+                    return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
 
             if name_id:  # 不考慮其他條件
                 query = f"{query} WHERE tn.id = '{name_id}'"
