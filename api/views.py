@@ -675,10 +675,10 @@ class TaxonView(APIView):
                 conditions = []
                 for i in ['is_hybrid', 'is_endemic', 'is_in_taiwan', 'is_fossil', 'is_terrestrial', 'is_freshwater', 'is_brackish', 'is_marine']:
                     var = request.GET.get(i, '').strip()
-                    if var == 'true':
+                    if var == 'true' or var == '1':
                         conditions += [f"t.{i} = 1"]
-                    elif var == 'false':
-                        conditions += [f"{i} = 0"]
+                    elif var == 'false' or var == '0':
+                        conditions += [f"t.{i} = 0"]
                 if var := request.GET.get('alien_type', '').strip():
                     conditions += ['''JSON_CONTAINS(t.alien_type, '{"alien_type":"''' + var + '''"}')  > 0''']
 
