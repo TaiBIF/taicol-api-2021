@@ -41,6 +41,11 @@ redlist_map = {
   'LC': 'NLC', 'DD': 'NDD', 'NA': 'NA', 'NE': 'NE'
 }
 
+redlist_map_rev = {
+  'NEX': 'EX', 'NEW': 'EW', 'NRE': 'RE', 'NCR': 'CR', 'NEN': 'EN', 'NVU': 'VU', 'NNT': 'NT',
+  'NLC': 'LC', 'NDD': 'DD', 'NA': 'NA', 'NE': 'NE'
+}
+
 cites_map = { 'I': '1','II':'2','III':'3','NC':'NC'}
 
 protected_map = {'第一級': 'I', '第二級': 'II', '第三級': 'III'}

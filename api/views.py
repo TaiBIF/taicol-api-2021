@@ -21,7 +21,7 @@ from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 from rest_framework.schemas import AutoSchema
 
-from api.utils import rank_map_c, rank_map, lin_map, lin_ranks, redlist_map, cites_map, protected_map
+from api.utils import rank_map_c, rank_map, lin_map, lin_ranks, redlist_map, cites_map, protected_map, redlist_map_rev
 import requests
 
 db_settings = {
@@ -594,9 +594,9 @@ class TaxonView(APIView):
                 type=openapi.TYPE_STRING
             ),
             openapi.Parameter(
-                name='protected',
+                name='sensitive',
                 in_=openapi.IN_QUERY,
-                description='保育類',
+                description='敏感物種',
                 type=openapi.TYPE_STRING
             ),
             openapi.Parameter(
@@ -634,7 +634,7 @@ class TaxonView(APIView):
                 list(request.GET.keys())) <= set(
                 ['taxon_id', 'taxon_group', 'updated_at', 'created_at', 'limit', 'offset', 'is_hybrid', 'is_endemic', 
                 'is_in_taiwan', 'alien_type', 'is_fossil', 'is_terrestrial', 'is_freshwater', 'is_brackish', 'is_marine',
-                'protected','redlist','iucn', 'cites', 'rank']):
+                'protected','redlist','iucn', 'cites', 'rank', 'sensitive']):
                 response = {"status": {"code": 400, "message": "Bad Request: Unsupported parameters"}}
                 return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
 
@@ -706,14 +706,18 @@ class TaxonView(APIView):
                 if cs := request.GET.getlist('redlist'):
                     cs_list = []
                     for css in cs:
-                        cs_list.append(f'ac.red_category = "{css}"')
+                        if css == 'null':
+                            cs_list.append(f'ac.red_category IS NULL')
+                        else:
+                            if redlist_map.get(css):
+                                cs_list.append(f'ac.red_category = "{redlist_map.get(css)}"')
                     if cs_list:
                         conditions.append(f"({' OR '.join(cs_list)})")
 
                 if cs := request.GET.getlist('protected'):
                     cs_list = []
                     for css in cs:
-                        if css == 'NULL':
+                        if css == 'null':
                             cs_list.append(f'ac.protected_category IS NULL')
                         else:
                             cs_list.append(f'ac.protected_category = "{css}"')
@@ -723,10 +727,20 @@ class TaxonView(APIView):
                 if cs := request.GET.getlist('iucn'):
                     cs_list = []
                     for css in cs:
-                        # if css == 'NULL':
-                        #     cs_list.append(f'ac.iucn_category IS NULL')
-                        # else:
-                        cs_list.append(f'ac.iucn_category = "{css}"')
+                        if css == 'null':
+                            cs_list.append(f'ac.iucn_category IS NULL')
+                        else:
+                            cs_list.append(f'ac.iucn_category = "{css}"')
+                    if cs_list:
+                        conditions.append(f"({' OR '.join(cs_list)})")
+
+                if cs := request.GET.getlist('sensitive'):
+                    cs_list = []
+                    for css in cs:
+                        if css == 'null':
+                            cs_list.append(f'ac.sensitive_suggest IS NULL')
+                        else:
+                            cs_list.append(f'ac.sensitive_suggest = "{css}"')
                     if cs_list:
                         conditions.append(f"({' OR '.join(cs_list)})")
 
@@ -734,13 +748,13 @@ class TaxonView(APIView):
                 if cs := request.GET.getlist('cites'):
                     cs_list = []
                     for css in cs:
-                        if css == 'NULL':
+                        if css == 'null':
                             cs_list.append(f'ac.cites_listing IS NULL')
                         else:
-                            cs_list.append(f'ac.cites_listing like "%{css}%"')
+                            if cites_map.get(css):
+                                cs_list.append(f'ac.cites_listing like "%{cites_map.get(css)}%"')
                     if cs_list:
-                        c_str = f" AND ({' OR '.join(cs_list)})"
-                        conditions.append(c_str)
+                        conditions.append(f"({' OR '.join(cs_list)})")
 
                 if taxon_group:
                     # 先抓taxon_id再判斷有沒有其他condition要考慮
@@ -833,6 +847,7 @@ class TaxonView(APIView):
                             df.loc[i, 'alien_type'] = ','.join(alt_list)
 
                     df['cites'] = df['cites'].apply(lambda x: x.replace('1','I').replace('2','II').replace('3','III') if x else x)
+                    df['redlist'] = df['redlist'].apply(lambda x: redlist_map_rev[x] if x else x)
                     df['name_id'] = df['name_id'].astype(int, errors='ignore')
                 df = df.replace({np.nan: None, '': None})
                 # 加上其他欄位
