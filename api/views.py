@@ -709,8 +709,8 @@ class TaxonView(APIView):
                         if css == 'null':
                             cs_list.append(f'ac.red_category IS NULL')
                         else:
-                            if redlist_map.get(css):
-                                cs_list.append(f'ac.red_category = "{redlist_map.get(css)}"')
+                            # if redlist_map.get(css):
+                            cs_list.append(f'ac.red_category = "{redlist_map.get(css)}"')
                     if cs_list:
                         conditions.append(f"({' OR '.join(cs_list)})")
 
@@ -751,8 +751,8 @@ class TaxonView(APIView):
                         if css == 'null':
                             cs_list.append(f'ac.cites_listing IS NULL')
                         else:
-                            if cites_map.get(css):
-                                cs_list.append(f'ac.cites_listing like "%{cites_map.get(css)}%"')
+                            # if cites_map.get(css):
+                            cs_list.append(f'ac.cites_listing like "%{cites_map.get(css)}%"')
                     if cs_list:
                         conditions.append(f"({' OR '.join(cs_list)})")
 
