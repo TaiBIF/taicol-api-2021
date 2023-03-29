@@ -28,7 +28,7 @@ environ.Env.read_env(os.path.join(BASE_DIR, '.env'))
 SECRET_KEY = 'gt3n3#ta%@6z*7mfkyp!21&u#(d&bv35!*4if6mjplws)bdt8*'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = env('DEBUG')
 
 ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=[])
 
@@ -63,13 +63,13 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:8007",
     "http://taicol.tw",
     "https://taicol.tw",
-    "http://127.0.0.1:3000",
-    "http://localhost:3000",
-    "http://taicol.ink.net.tw",
-    "http://tacicol.ink.net.tw:3000",
-    "https://taicol.ink.net.tw",
-    "https://tacicol.ink.net.tw:3000",
-    "http://taicol.ink.net.tw:3001/",
+    # "http://127.0.0.1:3000",
+    # "http://localhost:3000",
+    # "http://taicol.ink.net.tw",
+    # "http://tacicol.ink.net.tw:3000",
+    # "https://taicol.ink.net.tw",
+    # "https://tacicol.ink.net.tw:3000",
+    # "http://taicol.ink.net.tw:3001/",
     "http://web-staging.taicol.tw",
     "https://web-staging.taicol.tw",
 ]
