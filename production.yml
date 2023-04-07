@@ -9,9 +9,9 @@ services:
     volumes:
       - .:/code
       - ../taicol-volumes/static:/code/conf/static
-      - ../taicol-volumes/data:/code/data
+      # - ../taicol-volumes/data:/code/data
     expose:
-      - 8001
+      - 8002
     tty: true
     stdin_open: true
     env_file:

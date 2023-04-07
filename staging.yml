@@ -9,7 +9,7 @@ services:
     volumes:
       - .:/code
       - ../taicol-volumes/static:/code/conf/static
-      - ../taicol-volumes/data:/code/data
+      # - ../taicol-volumes/data:/code/data
     ports:
       - 8002:8002
     tty: true

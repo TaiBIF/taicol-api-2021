@@ -9,8 +9,9 @@ services:
     volumes:
       - .:/code
       - ../taicol-volumes/static:/code/conf/static
+      # - ../taicol-volumes/data:/code/data
     ports:
-      - 8000:8000
+      - 8005:8005
     env_file:
       - .env
     restart: always

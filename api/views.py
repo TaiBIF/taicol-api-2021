@@ -310,6 +310,7 @@ class NameMatchView(APIView):
                     # cursor.execute(query)
                     df = pd.DataFrame(cursor.fetchall(), columns=['matched_name', 'accepted_name', 'taxon_id', 'usage_status'])
                     df = df.replace({np.nan: None, '': None})
+                    print(df)
                     if len(df):
                         df = df.drop_duplicates()
                         df['usage_status'] = df['usage_status'].replace({'accepted': 'Accepted', 'misapplied': 'Misapplied', 'not-accepted': 'Not accepted'})

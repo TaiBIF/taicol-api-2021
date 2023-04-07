@@ -1,0 +1,10 @@
+
+WEB_ENV=dev
+ALLOWED_HOSTS=127.0.0.1,0.0.0.0
+NOMENMATCH_URL=http://match.taibif.tw/v2/api.php
+# connect to New TaiCOL database
+DB_HOST=
+DB_PORT=
+DB_USER=
+DB_PASSWORD=
+DB_DBNAME=
