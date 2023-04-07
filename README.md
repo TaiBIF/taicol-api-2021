@@ -2,7 +2,6 @@
 
 This is repository for [TaiCOL API v2](https://taicol.tw/api) developed based on [name tool](https://github.com/TaiBIF/taicol-2021) database schema.
 
----
 ## Deployment
 
 1. copy `dotenv.example` file and rename it to `.env`
@@ -28,7 +27,6 @@ This is repository for [TaiCOL API v2](https://taicol.tw/api) developed based on
 > sudo certbot --nginx
 > ```
 
----
 ## Documentation
 
 - [taicol.tw](https://taicol.tw/api)
