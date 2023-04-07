@@ -11,7 +11,6 @@ This is repository for [TaiCOL API v2](https://taicol.tw/api) developed based on
 
 > **Note**
 > To run [TaiCOL API v1](https://github.com/TaiBIF/taicol-test) and v2 at the same time, follow the following steps:
-
 > 1. run v1 on port 8001 and v2 on port 8002 docker separately
 > 2. move `scripts/custom_nginx.conf` to `/etc/nginx/conf.d/`
 > 3. restart nginx
