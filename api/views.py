@@ -278,7 +278,13 @@ class NameMatchView(APIView):
             conn = pymysql.connect(**db_settings)            
             df = pd.DataFrame(columns=['taxon_id', 'usage_status'])
             if name_id := request.GET.get('name_id'):
-                namecode_list = [name_id]
+                name_id = int(name_id)
+                with conn.cursor() as cursor:
+                    query = f"SELECT atu.taxon_id FROM api_taxon_usages atu WHERE atu.taxon_name_id = %s"  
+                    cursor.execute(query, (name_id,))
+                    tmp = cursor.fetchall()
+                    for t in tmp:
+                        namecode_list.append(t[0])
             elif name := request.GET.get('name'): # 如果是查name, 接NomenMatchAPI
                 best = request.GET.get('best')
                 if best and not best in ['yes', 'no']:
