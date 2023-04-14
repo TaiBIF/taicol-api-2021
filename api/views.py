@@ -162,12 +162,6 @@ class TaxonVersionView(APIView):
                         else:
                             data.append({'taxon_id': taxon_id, 'name_id': int(json.loads(n[0]).get('new_taxon_name_id')), 'reference_id': None, 'updated_at': n[1]})
 
-            # elif namecode := request.GET.getlist('namecode'):
-            #     conn = pymysql.connect(**db_settings)       
-            #     with conn.cursor() as cursor:     
-            #         query = "SELECT namecode, taxon_name_id FROM api_namecode WHERE namecode IN %s LIMIT %s OFFSET %s"
-            #         cursor.execute(query, (namecode,limit,offset))
-            #         df = pd.DataFrame(cursor.fetchall(), columns=['namecode', 'name_id'])
             response = {"status": {"code": 200, "message": "Success"},
                         "info": {"total": len(data)}, "data": data}
         except Exception as er:
@@ -316,7 +310,6 @@ class NameMatchView(APIView):
                     # cursor.execute(query)
                     df = pd.DataFrame(cursor.fetchall(), columns=['matched_name', 'accepted_name', 'taxon_id', 'usage_status'])
                     df = df.replace({np.nan: None, '': None})
-                    print(df)
                     if len(df):
                         df = df.drop_duplicates()
                         df['usage_status'] = df['usage_status'].replace({'accepted': 'Accepted', 'misapplied': 'Misapplied', 'not-accepted': 'Not accepted'})
@@ -471,7 +464,6 @@ class HigherTaxaView(APIView):
                                 found_hi += 1
                             higher.loc[hi, 'formatted_name'] = f'{higher.loc[found_hi].formatted_name} {lin_map[higher.loc[hi].rank_id]} incertae sedis'
                             higher.loc[hi, 'simple_name'] = f'{higher.loc[found_hi].simple_name} {lin_map[higher.loc[hi].rank_id]} incertae sedis'
-                        # higher = higher.replace({'': None, np.nan: None})
                         higher['rank'] = higher['rank_id'].apply(lambda x: rank_map[x])
                         higher['name_id'] = higher['name_id'].astype(int, errors='ignore')
                         higher = higher.replace({np.nan: None, '': None})
@@ -1062,20 +1054,11 @@ class NameView(APIView):
                     df.loc[df['rank'] < 34, 'name'] = '{}'
                     df.loc[df['rank'] < 34, 'original_name_id'] = None
                     df['rank'] = df['rank'].apply(lambda x: rank_map[x])
-                # df['type_name'] = None
-                # for t in df.type_name_id:
-                #     if t:
-                #         query_type_name = f"SELECT name FROM taxon_names WHERE id = {t}"
-                #         with conn.cursor() as cursor:
-                #             cursor.execute(query_type_name)
-                #             type_name_result = cursor.fetchone()
-                #         if type_name_result:
-                #             df.loc[df.type_name_id == t, 'type_name'] = type_name_result[0]
+
                 # find hybrid_parent
                 df['hybrid_parent'] = None
 
                 for h in df[['is_hybrid', 'name_id']].index:
-                    # TODO 目前is_hybrid都被設成False，這樣會抓不到，先暫時寫成下面的處理
                     if df.loc[h]['is_hybrid'] == 'true':
                         query_hybrid_parent = f"SELECT GROUP_CONCAT( CONCAT(tn.name, ' ',tn.formatted_authors) SEPARATOR ' × ' ) FROM taxon_name_hybrid_parent AS tnhp \
                                                 JOIN taxon_names AS tn ON tn.id = tnhp.parent_taxon_name_id \
@@ -1085,17 +1068,6 @@ class NameView(APIView):
                             cursor.execute(query_hybrid_parent)
                             hybrid_name_result = cursor.fetchall()
                         df.loc[df.name_id == df.loc[h]['name_id'], 'hybrid_parent'] = hybrid_name_result[0]
-                    # query_hybrid_parent = f"SELECT GROUP_CONCAT( CONCAT_WS(' ', tn.name, an.name_author) SEPARATOR ' × ' ) FROM taxon_name_hybrid_parent AS tnhp \
-                    #                         JOIN taxon_names AS tn ON tn.id = tnhp.parent_taxon_name_id \
-                    #                         LEFT JOIN api_names an ON an.taxon_name_id = tn.id \
-                    #                         WHERE tnhp.taxon_name_id = {df.loc[h]['name_id']} \
-                    #                         GROUP BY tnhp.taxon_name_id"
-                    # with conn.cursor() as cursor:
-                    #     cursor.execute(query_hybrid_parent)
-                    #     hybrid_name_result = cursor.fetchall()
-                    #     if hybrid_name_result:
-                    #         df.loc[df.name_id == df.loc[h]['name_id'], 'hybrid_parent'] = hybrid_name_result[0][0]
-                    #         df.loc[df.name_id == df.loc[h]['name_id'], 'is_hybrid'] = True
 
                 # organize results
                 df = df.replace({np.nan: None})
@@ -1129,10 +1101,9 @@ class NameView(APIView):
                     df['is_hybrid'] = df['is_hybrid'].replace('false', False).replace('true', True)
                     df.loc[df['name_author'] == "", 'name_author'] = None
                     df = df.replace({np.nan: None, '': None})
-                    df['name_id'] = df['name_id'].astype(int, errors='ignore')
-                    df['original_name_id'] = df['original_name_id'].astype(int, errors='ignore')
-                    df['type_name_id'] = df['type_name_id'].astype(int, errors='ignore')
-
+                    df[['name_id','original_name_id','type_name_id']] = df[['name_id','original_name_id','type_name_id']].replace({None: 0, np.nan: 0})
+                    df[['name_id','original_name_id','type_name_id']] = df[['name_id','original_name_id','type_name_id']].astype(int, errors='ignore')
+                    df[['name_id','original_name_id','type_name_id']] = df[['name_id','original_name_id','type_name_id']].replace({0: None})
                 response = {"status": {"code": 200, "message": "Success"},
                             "info": {"total": len_total, "limit": limit, "offset": offset}, "data": df.to_dict('records')}
         except Exception as er:
