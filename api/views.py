@@ -647,19 +647,22 @@ class TaxonView(APIView):
 
             conn = pymysql.connect(**db_settings)
 
-            if taxon_id:
-                query = f"""SELECT is_deleted, new_taxon_id FROM api_taxon WHERE taxon_id = %s"""
-                with conn.cursor() as cursor:
-                    cursor.execute(query, (taxon_id,))
-                    res = cursor.fetchone()
-                    if res:
-                        if res[0]:
-                            taxon_id = res[1]
+            # is_deleted = False
+
+            # if taxon_id:
+            #     query = f"""SELECT is_deleted, new_taxon_id FROM api_taxon WHERE taxon_id = %s"""
+            #     with conn.cursor() as cursor:
+            #         cursor.execute(query, (taxon_id,))
+            #         res = cursor.fetchone()
+            #         if res:
+            #             if res[0]:
+            #                 taxon_id = res[1]
+            #                 is_deleted = True
 
             query = "SELECT t.taxon_id, t.rank_id, t.accepted_taxon_name_id, t.common_name_c, t.alternative_name_c, \
                             t.is_hybrid, t.is_endemic, t.is_in_taiwan, t.alien_type, t.is_fossil, t.is_terrestrial, \
                             t.is_freshwater, t.is_brackish, t.is_marine, ac.cites_listing, ac.iucn_category, ac.red_category, ac.protected_category, ac.sensitive_suggest, \
-                            t.created_at, t.updated_at, tn.name, an.name_author, an.formatted_name FROM api_taxon t \
+                            t.created_at, t.updated_at, tn.name, an.name_author, an.formatted_name, t.is_deleted, t.new_taxon_id FROM api_taxon t \
                             JOIN taxon_names tn ON t.accepted_taxon_name_id = tn.id \
                             JOIN api_names an ON t.accepted_taxon_name_id = an.taxon_name_id \
                             LEFT JOIN api_conservation ac ON t.taxon_id = ac.taxon_id"
@@ -670,6 +673,10 @@ class TaxonView(APIView):
             if taxon_id:  # 不考慮其他條件
                 query = f"{query} WHERE t.taxon_id = '{taxon_id}'"
                 count_query = f"{count_query} WHERE t.taxon_id = '{taxon_id}'"
+            # # 如果已刪除且沒有新taxonID
+            # elif request.GET.get('taxon_id') and is_deleted and not taxon_id:
+            #     response = {"status": {"code": 200, "message": "Success"},
+            #                 "info": {"total": 0, "limit": limit, "offset": offset}, "data": df.to_dict('records')}
             else:
                 conditions = []
                 for i in ['is_hybrid', 'is_endemic', 'is_in_taiwan', 'is_fossil', 'is_terrestrial', 'is_freshwater', 'is_brackish', 'is_marine']:
@@ -800,7 +807,7 @@ class TaxonView(APIView):
                 df = pd.DataFrame(cursor.fetchall(), columns=['taxon_id', 'rank', 'name_id', 'common_name_c', 'alternative_name_c',
                                                               'is_hybrid', 'is_endemic', 'is_in_taiwan', 'alien_type', 'is_fossil', 'is_terrestrial',
                                                               'is_freshwater', 'is_brackish', 'is_marine', 'cites', 'iucn', 'redlist', 'protected', 'sensitive',
-                                                              'created_at', 'updated_at', 'simple_name', 'name_author', 'formatted_name'])
+                                                              'created_at', 'updated_at', 'simple_name', 'name_author', 'formatted_name', 'is_deleted', 'new_taxon_id'])
                 # 0, 1 要轉成true, false (但可能會有null)
                 if len(df):
                     df = df.replace({np.nan: None})
@@ -831,10 +838,6 @@ class TaxonView(APIView):
                         elif o[1] == 'misapplied':
                             df.loc[df['taxon_id'] == o[0], 'misapplied'] = o[3]
                             df.loc[df['taxon_id'] == o[0], 'formatted_misapplied'] = o[2]
-                    # 排序
-                    df = df[['taxon_id', 'name_id', 'simple_name', 'name_author', 'formatted_name', 'synonyms', 'formatted_synonyms', 'misapplied', 'formatted_misapplied',
-                            'rank', 'common_name_c', 'alternative_name_c', 'is_hybrid', 'is_endemic', 'is_in_taiwan', 'alien_type', 'is_fossil', 'is_terrestrial', 'is_freshwater', 'is_brackish',
-                             'is_marine', 'cites', 'iucn', 'redlist', 'protected', 'sensitive', 'created_at', 'updated_at']]
 
                     for i in df.index:
                         row = df.iloc[i]
@@ -848,7 +851,16 @@ class TaxonView(APIView):
                     df['cites'] = df['cites'].apply(lambda x: x.replace('1','I').replace('2','II').replace('3','III') if x else x)
                     df['redlist'] = df['redlist'].apply(lambda x: redlist_map_rev[x] if x else x)
                     df['name_id'] = df['name_id'].astype(int, errors='ignore')
+
+                    df['status'] = df['is_deleted'].replace({1: 'Deleted', 0: 'Accepted'})
+
+                    # 排序
+                    df = df[['taxon_id', 'status', 'name_id', 'simple_name', 'name_author', 'formatted_name', 'synonyms', 'formatted_synonyms', 'misapplied', 'formatted_misapplied',
+                            'rank', 'common_name_c', 'alternative_name_c', 'is_hybrid', 'is_endemic', 'is_in_taiwan', 'alien_type', 'is_fossil', 'is_terrestrial', 'is_freshwater', 'is_brackish',
+                             'is_marine', 'cites', 'iucn', 'redlist', 'protected', 'sensitive', 'created_at', 'updated_at', 'new_taxon_id']]
+
                 df = df.replace({np.nan: None, '': None})
+
                 # 加上其他欄位
                 response = {"status": {"code": 200, "message": "Success"},
                             "info": {"total": len_total, "limit": limit, "offset": offset}, "data": df.to_dict('records')}
@@ -978,8 +990,8 @@ class NameView(APIView):
                     return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
 
             if name_id:  # 不考慮其他條件
-                query = f"{query} WHERE tn.id = '{name_id}'"
-                count_query = f"{count_query} WHERE tn.id = '{name_id}'"
+                query = f"{query} WHERE tn.id = '{name_id}' AND tn.deleted_at IS NULL"
+                count_query = f"{count_query} WHERE tn.id = '{name_id}' AND tn.deleted_at IS NULL"
             elif scientific_name:  # 不考慮分類群, scientific_name, updated_at, created_at
                 query = f"{query} WHERE tn.name = '{scientific_name}'"
                 count_query = f"{count_query} WHERE tn.name = '{scientific_name}'"
