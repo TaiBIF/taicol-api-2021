@@ -1079,7 +1079,8 @@ class NameView(APIView):
                         with conn.cursor() as cursor:
                             cursor.execute(query_hybrid_parent)
                             hybrid_name_result = cursor.fetchall()
-                        df.loc[df.name_id == df.loc[h]['name_id'], 'hybrid_parent'] = hybrid_name_result[0]
+                        if hybrid_name_result:
+                            df.loc[df.name_id == df.loc[h]['name_id'], 'hybrid_parent'] = hybrid_name_result[0]
 
                 # organize results
                 df = df.replace({np.nan: None})
