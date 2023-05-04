@@ -378,7 +378,8 @@ class ReferencesView(APIView):
                             df = df.append({'reference_id': r[0], 'citation': r[1], 'status': None,
                                             'indications': None, 'is_in_taiwan': None, 'is_endemic': None, 'alien_type': None}, ignore_index=True)
             df = df.replace({np.nan: None, '': None})
-            df['reference_id'] = df['reference_id'].astype(int, errors='ignore')
+            df['reference_id'] = df['reference_id'].replace({np.nan: 0}).astype('int64').replace({0: None})
+            
             response = {"status": {"code": 200, "message": "Success"},
                         "info": {"total": len(df)}, "data": df.to_dict('records')}
         except Exception as er:
@@ -449,6 +450,7 @@ class HigherTaxaView(APIView):
                             higher = cursor.fetchall()
                             higher = pd.DataFrame(higher, columns=['taxon_id','name_id','simple_name','name_author',
                                                     'formatted_name','rank_id','common_name_c'])
+                            
                         # 補上階層未定 
                         # 先找出應該要有哪些林奈階層
                         current_ranks = higher.rank_id.to_list() + [info[0]]
@@ -465,8 +467,9 @@ class HigherTaxaView(APIView):
                             higher.loc[hi, 'formatted_name'] = f'{higher.loc[found_hi].formatted_name} {lin_map[higher.loc[hi].rank_id]} incertae sedis'
                             higher.loc[hi, 'simple_name'] = f'{higher.loc[found_hi].simple_name} {lin_map[higher.loc[hi].rank_id]} incertae sedis'
                         higher['rank'] = higher['rank_id'].apply(lambda x: rank_map[x])
-                        higher['name_id'] = higher['name_id'].astype(int, errors='ignore')
                         higher = higher.replace({np.nan: None, '': None})
+                        higher['name_id'] = higher['name_id'].replace({np.nan: 0}).astype('int64').replace({0: None})
+                        
                         data = higher[['taxon_id','name_id','simple_name','name_author','formatted_name','rank','common_name_c']].to_dict(orient='records')
 
             response = {"status": {"code": 200, "message": "Success"},
@@ -850,7 +853,6 @@ class TaxonView(APIView):
 
                     df['cites'] = df['cites'].apply(lambda x: x.replace('1','I').replace('2','II').replace('3','III') if x else x)
                     df['redlist'] = df['redlist'].apply(lambda x: redlist_map_rev[x] if x else x)
-                    df['name_id'] = df['name_id'].astype(int, errors='ignore')
 
                     df['status'] = df['is_deleted'].replace({1: 'Deleted', 0: 'Accepted'})
 
@@ -859,7 +861,8 @@ class TaxonView(APIView):
                             'rank', 'common_name_c', 'alternative_name_c', 'is_hybrid', 'is_endemic', 'is_in_taiwan', 'alien_type', 'is_fossil', 'is_terrestrial', 'is_freshwater', 'is_brackish',
                              'is_marine', 'cites', 'iucn', 'redlist', 'protected', 'sensitive', 'created_at', 'updated_at', 'new_taxon_id']]
 
-                df = df.replace({np.nan: None, '': None})
+                    df = df.replace({np.nan: None, '': None})
+                    df['name_id'] = df['name_id'].replace({np.nan: 0}).astype('int64').replace({0: None})
 
                 # 加上其他欄位
                 response = {"status": {"code": 200, "message": "Success"},
@@ -1115,8 +1118,8 @@ class NameView(APIView):
                     df.loc[df['name_author'] == "", 'name_author'] = None
                     df = df.replace({np.nan: None, '': None})
                     df[['name_id','original_name_id','type_name_id']] = df[['name_id','original_name_id','type_name_id']].replace({None: 0, np.nan: 0})
-                    df[['name_id','original_name_id','type_name_id']] = df[['name_id','original_name_id','type_name_id']].astype(int, errors='ignore')
-                    df[['name_id','original_name_id','type_name_id']] = df[['name_id','original_name_id','type_name_id']].replace({0: None})
+                    df[['name_id','original_name_id','type_name_id']] = df[['name_id','original_name_id','type_name_id']].replace({np.nan: 0}).astype('int64').replace({0: None})
+                    # df[['name_id','original_name_id','type_name_id']] = df[['name_id','original_name_id','type_name_id']].replace({0: None})
                 response = {"status": {"code": 200, "message": "Success"},
                             "info": {"total": len_total, "limit": limit, "offset": offset}, "data": df.to_dict('records')}
         except Exception as er:
