@@ -1,3 +1,4 @@
+
 version: '3.7'
 
 services:
@@ -10,9 +11,27 @@ services:
       - .:/code
       - ../taicol-volumes/static:/code/conf/static
       # - ../taicol-volumes/data:/code/data
-    ports:
-      - 8002:8002
+    expose:
+      - 8002
     tty: true
     stdin_open: true
     env_file:
       - .env
+
+  nginx:
+    image: nginx
+    restart: always
+    ports:
+      - 80:80
+      # - 443:443
+    volumes:
+      - ./scripts/nginx-django.conf:/etc/nginx/conf.d/nginx-django.conf
+      # - ./taicol-volumes/logs/nginx:/var/log/nginx
+      - ../taicol-volumes/static:/code/conf/static
+      # - ./taicol-volumes/certbot/conf:/etc/letsencrypt
+      # - ./taicol-volumes/certbot/www:/var/www/certbot
+    links:
+      - web:web
+    command: "/bin/sh -c 'while :; do sleep 6h & wait $${!}; nginx -s reload; done &
+      nginx -g \"daemon off;\"'"
+
