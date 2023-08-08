@@ -34,6 +34,7 @@ conn = pymysql.connect(**db_settings)
 #     for r in results:
 #         rank_map_c.update({r[0]: r[1].replace('"', '')})
 
+status_map = {'accepted': 'Accepted', 'misapplied': 'Misapplied', 'not-accepted': 'Not accepted', 'deleted': 'Deleted', 'undetermined': 'Undetermined'}
 
 
 redlist_map = {

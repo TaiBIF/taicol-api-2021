@@ -21,7 +21,7 @@ from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 from rest_framework.schemas import AutoSchema
 
-from api.utils import rank_map_c, rank_map, lin_map, lin_ranks, redlist_map, cites_map, protected_map, redlist_map_rev, get_variants
+from api.utils import rank_map_c, rank_map, lin_map, lin_ranks, redlist_map, cites_map, protected_map, redlist_map_rev, get_variants, status_map
 import requests
 
 db_settings = {
@@ -242,9 +242,9 @@ class NamecodeView(APIView):
                         taxon_final = []
                         for t in taxon_tmp:
                             if t.get('is_deleted'):
-                                taxon_final.append({'taxon_id': t.get('taxon_id'), 'status': 'deleted'})
+                                taxon_final.append({'taxon_id': t.get('taxon_id'), 'status': 'Deleted'})
                             elif t.get('taxon_id'):
-                                taxon_final.append({'taxon_id': t.get('taxon_id'), 'status': t.get('status')})
+                                taxon_final.append({'taxon_id': t.get('taxon_id'), 'status': status_map[t.get('status')]})
                         df.loc[i,'taxon'] = json.dumps(taxon_final)
                     if len(df):
                         df['taxon'] = df['taxon'].apply(json.loads)
@@ -275,9 +275,9 @@ class NamecodeView(APIView):
                         taxon_final = []
                         for t in taxon_tmp:
                             if t.get('is_deleted'):
-                                taxon_final.append({'taxon_id': t.get('taxon_id'), 'status': 'deleted'})
+                                taxon_final.append({'taxon_id': t.get('taxon_id'), 'status': 'Deleted'})
                             elif t.get('taxon_id'):
-                                taxon_final.append({'taxon_id': t.get('taxon_id'), 'status': t.get('status')})
+                                taxon_final.append({'taxon_id': t.get('taxon_id'), 'status': status_map[t.get('status')]})
                         df.loc[i,'taxon'] = json.dumps(taxon_final)
                     if len(df):
                         df['taxon'] = df['taxon'].apply(json.loads)
