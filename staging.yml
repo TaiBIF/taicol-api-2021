@@ -6,7 +6,7 @@ services:
     build: .
     container_name: tc-api-container
     image: tc-api-image
-    command: ./scripts/docker-entry.sh
+    command: /srv/start
     volumes:
       - .:/code
       - ../taicol-volumes/static:/code/conf/static
@@ -17,7 +17,6 @@ services:
     stdin_open: true
     env_file:
       - .env
-
   nginx:
     image: nginx
     restart: always
@@ -34,7 +33,6 @@ services:
       - web:web
     command: "/bin/sh -c 'while :; do sleep 6h & wait $${!}; nginx -s reload; done &
       nginx -g \"daemon off;\"'"
-
   mysql:
     build: ./scripts/mysql
     container_name: tc-api-mysql-container
