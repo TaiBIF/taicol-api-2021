@@ -707,12 +707,13 @@ class TaxonView(APIView):
             conn = pymysql.connect(**db_settings)
 
             query = """
-                    WITH base_query AS (SELECT t.taxon_id FROM api_taxon t 
+                    WITH base_query AS (SELECT distinct t.taxon_id FROM api_taxon t 
                     JOIN taxon_names tn ON t.accepted_taxon_name_id = tn.id 
                     JOIN api_taxon_usages atu ON t.taxon_id = atu.taxon_id
                     JOIN taxon_names tnn ON atu.taxon_name_id = tnn.id
                     LEFT JOIN api_common_name acn ON t.taxon_id = acn.taxon_id
                     LEFT JOIN api_names an ON t.accepted_taxon_name_id = an.taxon_name_id 
+                    LEFT JOIN api_taxon_tree att ON t.taxon_id = att.taxon_id 
                     LEFT JOIN api_conservation ac ON t.taxon_id = ac.taxon_id """
             
             info_query = """
@@ -724,6 +725,7 @@ class TaxonView(APIView):
                     JOIN taxon_names tn ON t.accepted_taxon_name_id = tn.id 
                     JOIN api_taxon_usages atu ON t.taxon_id = atu.taxon_id
                     JOIN taxon_names tnn ON atu.taxon_name_id = tnn.id
+                    LEFT JOIN api_taxon_tree att ON t.taxon_id = att.taxon_id 
                     LEFT JOIN api_common_name acn ON t.taxon_id = acn.taxon_id and acn.is_primary = 1
                     LEFT JOIN api_common_name acnn ON t.taxon_id = acnn.taxon_id and acnn.is_primary = 0
                     LEFT JOIN api_names an ON t.accepted_taxon_name_id = an.taxon_name_id 
@@ -742,6 +744,7 @@ class TaxonView(APIView):
                             LEFT JOIN api_common_name acn ON t.taxon_id = acn.taxon_id
                             LEFT JOIN api_names an ON t.accepted_taxon_name_id = an.taxon_name_id 
                             LEFT JOIN api_conservation ac ON t.taxon_id = ac.taxon_id
+                            LEFT JOIN api_taxon_tree att ON t.taxon_id = att.taxon_id 
                         """
 
             if taxon_id:  # 不考慮其他條件
@@ -847,31 +850,32 @@ class TaxonView(APIView):
                     query_1 = f"""SELECT t.taxon_id FROM taxon_names tn 
                                 JOIN api_taxon t ON tn.id = t.accepted_taxon_name_id 
                                 LEFT JOIN api_common_name acn ON acn.taxon_id = t.taxon_id  
-                                WHERE tn.name = '{taxon_group}' OR acn.name_c = '{taxon_group}'"""
+                                WHERE tn.name = %s OR acn.name_c = %s"""
                     with conn.cursor() as cursor:
-                        cursor.execute(query_1)
+                        cursor.execute(query_1, (taxon_group, taxon_group))
                         t_id = cursor.fetchall()           
                         if len(t_id):
                             # 可能不只一筆
-                            query_2 = "SELECT taxon_id FROM api_taxon_tree WHERE"
-                            t_count = 0
-                            for t in t_id:
-                                t_count += 1
-                                if t_count == 1:
-                                    query_2 += f" path like '%>{t[0]}%' or taxon_id = '{t[0]}'"
-                                else:
-                                    query_2 += f" or path like '%>{t[0]}%' or taxon_id = '{t[0]}'"
-                            if t_count > 0:
-                                with conn.cursor() as cursor:
-                                    cursor.execute(query_2)
-                                    results = cursor.fetchall()
-                                    if results:
-                                        results = str([i[0] for i in results]).replace('[', '(').replace(']', ')')
-                                        conditions += [f"t.taxon_id IN {results}"]
-                                    else:  # 如果沒有結果的話用回傳空值
-                                        response = {"status": {"code": 200, "message": "Success"},
-                                                    "info": {"total": 0, "limit": limit, "offset": offset}, "data": []}
-                                        return HttpResponse(json.dumps(response, ensure_ascii=False, cls=DateTimeEncoder), content_type="application/json,charset=utf-8")
+                            t_str = [ f"att.path like '%>{t[0]}%'" for t in t_id]
+                            conditions.append(f"({' OR '.join(t_str)})")
+                            # query_2 = "SELECT taxon_id FROM api_taxon_tree WHERE"
+                            # t_count = 0
+                            # for t in t_id:
+                            #     t_count += 1
+                            #     if t_count == 1:
+                            #         query_2 += f" path like '%>{t[0]}%' or taxon_id = '{t[0]}'"
+                            #     else:
+                            #         query_2 += f" or path like '%>{t[0]}%' or taxon_id = '{t[0]}'"
+                            # if t_count > 0:
+                            #     with conn.cursor() as cursor:
+                            #         cursor.execute(query_2)
+                            #         results = cursor.fetchall()
+                            #         if results:
+                            #             results = str([i[0] for i in results]).replace('[', '(').replace(']', ')')
+                            # else:  # 如果沒有結果的話用回傳空值
+                            #     response = {"status": {"code": 200, "message": "Success"},
+                            #                 "info": {"total": 0, "limit": limit, "offset": offset}, "data": []}
+                            #     return HttpResponse(json.dumps(response, ensure_ascii=False, cls=DateTimeEncoder), content_type="application/json,charset=utf-8")
                         else:  # 如果沒有結果的話用回傳空值
                             response = {"status": {"code": 200, "message": "Success"},
                                         "info": {"total": 0, "limit": limit, "offset": offset}, "data": []}
@@ -882,7 +886,7 @@ class TaxonView(APIView):
                         query = f"{query} WHERE {conditions[l]}"
                         count_query = f"{count_query} WHERE {conditions[l]}"
                     else:
-                        query += f' AND {conditions[l]})'
+                        query += f' AND {conditions[l]}'
                         count_query += f" AND {conditions[l]}"
 
             with conn.cursor() as cursor:
