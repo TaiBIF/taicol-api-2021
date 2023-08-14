@@ -242,9 +242,9 @@ class NamecodeView(APIView):
                         taxon_final = []
                         for t in taxon_tmp:
                             if t.get('is_deleted'):
-                                taxon_final.append({'taxon_id': t.get('taxon_id'), 'status': 'Deleted'})
+                                taxon_final.append({'taxon_id': t.get('taxon_id'), 'usage_status': 'deleted'})
                             elif t.get('taxon_id'):
-                                taxon_final.append({'taxon_id': t.get('taxon_id'), 'status': status_map[t.get('status')]})
+                                taxon_final.append({'taxon_id': t.get('taxon_id'), 'usage_status': t.get('status')})
                         df.loc[i,'taxon'] = json.dumps(taxon_final)
                     if len(df):
                         df['taxon'] = df['taxon'].apply(json.loads)
@@ -275,9 +275,9 @@ class NamecodeView(APIView):
                         taxon_final = []
                         for t in taxon_tmp:
                             if t.get('is_deleted'):
-                                taxon_final.append({'taxon_id': t.get('taxon_id'), 'status': 'Deleted'})
+                                taxon_final.append({'taxon_id': t.get('taxon_id'), 'usage_status': 'deleted'})
                             elif t.get('taxon_id'):
-                                taxon_final.append({'taxon_id': t.get('taxon_id'), 'status': status_map[t.get('status')]})
+                                taxon_final.append({'taxon_id': t.get('taxon_id'), 'usage_status': t.get('status')})
                         df.loc[i,'taxon'] = json.dumps(taxon_final)
                     if len(df):
                         df['taxon'] = df['taxon'].apply(json.loads)
@@ -364,8 +364,8 @@ class NameMatchView(APIView):
                     df = df.replace({np.nan: None, '': None})
                     if len(df):
                         df = df.drop_duplicates()
-                        df.loc[df.is_deleted==1, 'usage_status'] = 'Deleted'
-                        df['usage_status'] = df['usage_status'].replace({'accepted': 'Accepted', 'misapplied': 'Misapplied', 'not-accepted': 'Not accepted'})
+                        df.loc[df.is_deleted==1, 'usage_status'] = 'deleted'
+                        df['usage_status'] = df['usage_status']
                         df = df.drop(columns=['is_deleted'])
             response = {"status": {"code": 200, "message": "Success"},
                         "info": {"total": len(df)}, "data": df.to_dict('records')}
@@ -408,7 +408,7 @@ class ReferencesView(APIView):
                 conn = pymysql.connect(**db_settings)
                 with conn.cursor() as cursor:
                     cursor.execute(query, (name_id,))
-                    df = pd.DataFrame(cursor.fetchall(), columns=['reference_id', 'citation', 'status', 'indications', 'is_in_taiwan', 'is_endemic', 'alien_type', 'is_deleted'])
+                    df = pd.DataFrame(cursor.fetchall(), columns=['reference_id', 'citation', 'usage_status', 'indications', 'is_in_taiwan', 'is_endemic', 'alien_type', 'is_deleted'])
                     df = df.replace({np.nan: None})
                     if len(df):
                         df['is_deleted'] = df['is_deleted'].apply(lambda x: True if x else False)
@@ -434,7 +434,7 @@ class ReferencesView(APIView):
                                             'indications': None, 'is_in_taiwan': None, 'is_endemic': None, 'alien_type': None}, ignore_index=True)
             df = df.replace({np.nan: None, '': None})
             df['reference_id'] = df['reference_id'].replace({np.nan: 0}).astype('int64').replace({0: None})
-            df['status'] = df['status'].replace({'accepted': 'Accepted', 'misapplied': 'Misapplied', 'not-accepted': 'Not accepted', 'undetermined':'Undetermined'})
+            df['usage_status'] = df['usage_status']
             response = {"status": {"code": 200, "message": "Success"},
                         "info": {"total": len(df)}, "data": df.to_dict('records')}
         except Exception as er:
@@ -943,10 +943,10 @@ class TaxonView(APIView):
                     df['redlist'] = df['redlist'].apply(lambda x: redlist_map_rev[x] if x else x)
 
                     # TODO 這邊的status要確認
-                    df['status'] = df['is_deleted'].replace({1: 'Deleted', 0: 'Accepted'})
+                    df['taxon_status'] = df['is_deleted'].replace({1: 'deleted', 0: 'accepted'})
 
                     # 排序
-                    df = df[['taxon_id', 'status', 'name_id', 'simple_name', 'name_author', 'formatted_name', 'synonyms', 'formatted_synonyms', 'misapplied', 'formatted_misapplied',
+                    df = df[['taxon_id', 'taxon_status', 'name_id', 'simple_name', 'name_author', 'formatted_name', 'synonyms', 'formatted_synonyms', 'misapplied', 'formatted_misapplied',
                             'rank', 'common_name_c', 'alternative_name_c', 'is_hybrid', 'is_endemic', 'is_in_taiwan', 'alien_type', 'is_fossil', 'is_terrestrial', 'is_freshwater', 'is_brackish',
                              'is_marine', 'cites', 'iucn', 'redlist', 'protected', 'sensitive', 'created_at', 'updated_at', 'new_taxon_id']]
 
