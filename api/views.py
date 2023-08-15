@@ -525,9 +525,8 @@ class HigherTaxaView(APIView):
                     higher['rank'] = higher['rank_id'].apply(lambda x: rank_map[x])
                     higher = higher.replace({np.nan: None, '': None})
                     higher['name_id'] = higher['name_id'].replace({np.nan: 0}).astype('int64').replace({0: None})
-                    
+                    # higher = higher.sort_values('rank_id', ignore_index=True, ascending=True)
                     data = higher[['taxon_id','name_id','simple_name','name_author','formatted_name','rank','common_name_c']].to_dict(orient='records')
-
             response = {"status": {"code": 200, "message": "Success"},
                         "data": data}
         except Exception as er:
@@ -1180,6 +1179,44 @@ class NameView(APIView):
                 df = df.replace({np.nan: None})
 
                 if len(df):
+
+
+                    # 加上taxon
+
+                    with conn.cursor() as cursor:     
+                        query = """
+                        WITH cte
+                            AS
+                            (
+                                SELECT distinct atu.taxon_name_id, atu.taxon_id, atu.status, at.is_deleted
+                                FROM api_taxon_usages atu
+                                LEFT JOIN api_taxon at ON at.taxon_id = atu.taxon_id
+                                WHERE atu.taxon_name_id IN %s 
+                            )
+                        SELECT taxon_name_id, 
+                        JSON_ARRAYAGG(JSON_OBJECT('taxon_id', taxon_id, 'status', status, 'is_deleted', is_deleted))
+                        FROM cte GROUP BY taxon_name_id;
+                        """
+                        cursor.execute(query, (df.name_id.to_list(),))
+                        taxon_df = pd.DataFrame(cursor.fetchall(), columns=['name_id', 'taxon'])
+                        for i in taxon_df.index:
+                            row = taxon_df.iloc[i]
+                            taxon_tmp = json.loads(row.taxon)
+                            taxon_final = []
+                            for t in taxon_tmp:
+                                if t.get('is_deleted'):
+                                    taxon_final.append({'taxon_id': t.get('taxon_id'), 'usage_status': 'deleted'})
+                                elif t.get('taxon_id'):
+                                    taxon_final.append({'taxon_id': t.get('taxon_id'), 'usage_status': t.get('status')})
+                            taxon_df.loc[i,'taxon'] = json.dumps(taxon_final)
+
+                    if len(taxon_df):
+                        df = df.merge(taxon_df, how='left')    
+                    else:
+                        df['taxon'] = '[]'
+                    
+                    df['taxon'] = df['taxon'].apply(json.loads)
+
                     # 日期格式 yy-mm-dd
                     df['created_at'] = df.created_at.dt.strftime('%Y-%m-%d')
                     df['updated_at'] = df.updated_at.dt.strftime('%Y-%m-%d')
@@ -1206,7 +1243,7 @@ class NameView(APIView):
 
                     # subset & rename columns
                     df = df[['name_id', 'nomenclature_name', 'rank', 'simple_name', 'name_author', 'formatted_name', 'name', 'original_name_id',
-                            'is_hybrid', 'hybrid_parent', 'protologue', 'type_name_id', 'namecode', 'is_deleted', 'created_at', 'updated_at']]
+                            'is_hybrid', 'hybrid_parent', 'protologue', 'type_name_id', 'namecode', 'taxon', 'is_deleted', 'created_at', 'updated_at']]
 
                     df['is_hybrid'] = df['is_hybrid'].replace('false', False).replace('true', True)
                     df.loc[df['name_author'] == "", 'name_author'] = None
