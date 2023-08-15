@@ -47,7 +47,6 @@ services:
     volumes:
       - ../taicol-volumes/mysql:/var/lib/mysql:rw
       - ../taicol-volumes/bucket:/bucket
-      # - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql:rw
     command:
       [
         "mysqld",
