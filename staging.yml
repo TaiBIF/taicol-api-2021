@@ -22,7 +22,7 @@ services:
     restart: always
     ports:
       - 80:80
-      # - 443:443
+      - 443:443
     volumes:
       - ./scripts/nginx-django.conf:/etc/nginx/conf.d/nginx-django.conf
       # - ./taicol-volumes/logs/nginx:/var/log/nginx
