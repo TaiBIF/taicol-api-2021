@@ -247,6 +247,7 @@ class NamecodeView(APIView):
                                 taxon_final.append({'taxon_id': t.get('taxon_id'), 'usage_status': t.get('status')})
                         df.loc[i,'taxon'] = json.dumps(taxon_final)
                     if len(df):
+                        df['taxon'] = df['taxon'].replace({np.nan:'[]'})
                         df['taxon'] = df['taxon'].apply(json.loads)
 
             elif namecode := request.GET.getlist('namecode'):
@@ -280,6 +281,7 @@ class NamecodeView(APIView):
                                 taxon_final.append({'taxon_id': t.get('taxon_id'), 'usage_status': t.get('status')})
                         df.loc[i,'taxon'] = json.dumps(taxon_final)
                     if len(df):
+                        df['taxon'] = df['taxon'].replace({np.nan:'[]'})
                         df['taxon'] = df['taxon'].apply(json.loads)
 
             response = {"status": {"code": 200, "message": "Success"},
@@ -1154,6 +1156,9 @@ class NameView(APIView):
                                                'type_name_id', 'latin_genus', 'latin_s1', 'species_layers', 'formatted_name', 'namecode', 'is_deleted'])
                 cursor.execute(count_query)
                 len_total = cursor.fetchall()[0][0]
+
+                # print(query)
+                # print(count_query)
                 # only rank >= 34 has 物種學名分欄 & original_name_id
                 if len_total:
                     df.loc[df['rank'] < 34, 'name'] = '{}'
@@ -1215,6 +1220,8 @@ class NameView(APIView):
                     else:
                         df['taxon'] = '[]'
                     
+
+                    df['taxon'] = df['taxon'].replace({np.nan:'[]'})
                     df['taxon'] = df['taxon'].apply(json.loads)
 
                     # 日期格式 yy-mm-dd
@@ -1255,6 +1262,7 @@ class NameView(APIView):
         except Exception as er:
             print(er)
             response = {"status": {"code": 500, "message": "Unexpected Error"}}
+
 
         return HttpResponse(json.dumps(response, ensure_ascii=False, cls=DateTimeEncoder), content_type="application/json,charset=utf-8")
         # https://www.django-rest-framework.org/api-guide/exceptions/
