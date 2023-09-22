@@ -11,8 +11,8 @@ services:
       - .:/code
       - ../taicol-volumes/static:/code/conf/static
       # - ../taicol-volumes/data:/code/data
-    ports:
-      - 8002:8002
+    expose:
+      - 8002
     tty: true
     stdin_open: true
     env_file:
