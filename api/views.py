@@ -348,11 +348,12 @@ class NameMatchView(APIView):
                         for ds in d:
                             for r in ds['results']:
                                 name_list.append(r.get('simple_name'))
-                    with conn.cursor() as cursor:
-                        query = "SELECT id FROM taxon_names where name IN %s;"
-                        cursor.execute(query, (name_list,))
-                        name_ = cursor.fetchall()
-                        name_id_list = [n[0] for n in name_]
+                    if name_list:
+                        with conn.cursor() as cursor:
+                            query = "SELECT id FROM taxon_names where name IN %s;"
+                            cursor.execute(query, (name_list,))
+                            name_ = cursor.fetchall()
+                            name_id_list = [n[0] for n in name_]
             if name_id_list:
                 with conn.cursor() as cursor:
                     query = f"SELECT distinct t.name, t.id, t1.name, t1.id, atu.taxon_id, atu.status, at.is_deleted \
