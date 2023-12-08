@@ -1035,6 +1035,7 @@ class NameView(APIView):
             # update_citations()
 
             conn = pymysql.connect(**db_settings)
+            base_query = "SELECT * FROM taxon_names tn "
             query = "SELECT tn.id, tn.rank_id, tn.name, an.name_author, \
                             tn.original_taxon_name_id, tn.note, tn.created_at, tn.updated_at, \
                             n.name, JSON_EXTRACT(tn.properties,'$.is_hybrid'), \
@@ -1044,7 +1045,7 @@ class NameView(APIView):
                             tn.properties ->> '$.latin_s1',\
                             tn.properties ->> '$.species_layers',\
                             an.formatted_name,  anc.namecode, tn.deleted_at\
-                            FROM taxon_names AS tn \
+                            FROM base_query AS tn \
                             JOIN nomenclatures n ON tn.nomenclature_id = n.id \
                             LEFT JOIN api_namecode anc ON tn.id = anc.taxon_name_id \
                             LEFT JOIN api_names an ON tn.id = an.taxon_name_id \
@@ -1073,13 +1074,13 @@ class NameView(APIView):
                     return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
 
             if name_id:  # 不考慮其他條件
-                query = f"{query} WHERE tn.id = '{name_id}'"
+                base_query = f"{base_query} WHERE tn.id = '{name_id}'"
                 count_query = f"{count_query} WHERE tn.id = '{name_id}'"
             elif scientific_name:  # 不考慮分類群, scientific_name, updated_at, created_at
-                query = f"{query} WHERE tn.name = '{scientific_name}'"
+                base_query = f"{base_query} WHERE tn.name = '{scientific_name}'"
                 count_query = f"{count_query} WHERE tn.name = '{scientific_name}'"
                 for c in conditions:
-                    query += " AND " + c
+                    base_query += " AND " + c
                     count_query += " AND " + c
             elif taxon_group:
                 # 先由 學名 / 中文名 找出符合的name_id
@@ -1114,10 +1115,10 @@ class NameView(APIView):
                 all_results = results + all_child_results
 
                 if all_results:
-                    query = f"{query} WHERE tn.id IN {str(tuple((item[0] for item in all_results)))}"
+                    base_query = f"{base_query} WHERE tn.id IN {str(tuple((item[0] for item in all_results)))}"
                     count_query = f"{count_query} WHERE tn.id IN {str(tuple((item[0] for item in all_results)))}"
                     for c in conditions:
-                        query += " AND " + c
+                        base_query += " AND " + c
                         count_query += " AND " + c
                 else:
                     # 沒有結果的狀態
@@ -1128,14 +1129,14 @@ class NameView(APIView):
             else:
                 for l in range(len(conditions)):
                     if l == 0:
-                        query = f"{query} WHERE {conditions[l]}"
+                        base_query = f"{base_query} WHERE {conditions[l]}"
                         count_query = f"{count_query} WHERE {conditions[l]}"
                     else:
                         query += f' AND {conditions[l]}'
                         count_query += f" AND {conditions[l]}"
                 # print('else: ', query)
             with conn.cursor() as cursor:
-                query += f' ORDER BY id LIMIT {limit} OFFSET {offset}'  # 只處理限制筆數
+                query = f'WITH base_query AS ({base_query} ORDER BY tn.id LIMIT {limit} OFFSET {offset} ) {query}'  # 只處理限制筆數
                 cursor.execute(query)
                 df = cursor.fetchall()
                 df = [list(item) for item in df]
@@ -1149,10 +1150,11 @@ class NameView(APIView):
                 # print(query)
                 # print(count_query)
                 # only rank >= 34 has 物種學名分欄 & original_name_id
-                if len_total:
+                if len(df):
                     df.loc[df['rank'] < 34, 'name'] = '{}'
                     df.loc[df['rank'] < 34, 'original_name_id'] = None
                     df['rank'] = df['rank'].apply(lambda x: rank_map[x])
+                
 
                 # find hybrid_parent
                 df['hybrid_parent'] = None
