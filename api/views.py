@@ -1132,7 +1132,7 @@ class NameView(APIView):
                         count_query += f" AND {conditions[l]}"
                 # print('else: ', query)
             with conn.cursor() as cursor:
-                query += f' LIMIT {limit} OFFSET {offset}'  # 只處理限制筆數
+                query += f' ORDER BY id LIMIT {limit} OFFSET {offset}'  # 只處理限制筆數
                 cursor.execute(query)
                 df = cursor.fetchall()
                 df = [list(item) for item in df]
