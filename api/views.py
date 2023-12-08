@@ -709,68 +709,93 @@ class TaxonView(APIView):
 
             conn = pymysql.connect(**db_settings)
 
-            query = """
-                    WITH base_query AS (SELECT distinct t.taxon_id FROM api_taxon t 
-                    JOIN taxon_names tn ON t.accepted_taxon_name_id = tn.id 
-                    JOIN api_taxon_usages atu ON t.taxon_id = atu.taxon_id
-                    JOIN taxon_names tnn ON atu.taxon_name_id = tnn.id
-                    LEFT JOIN api_common_name acn ON t.taxon_id = acn.taxon_id
-                    LEFT JOIN api_names an ON t.accepted_taxon_name_id = an.taxon_name_id 
-                    LEFT JOIN api_taxon_tree att ON t.taxon_id = att.taxon_id 
-                    LEFT JOIN api_conservation ac ON t.taxon_id = ac.taxon_id """
+            # query = """
+            #         WITH base_query AS (SELECT distinct t.taxon_id FROM api_taxon t 
+            #         JOIN api_taxon_usages atu ON t.taxon_id = atu.taxon_id
+            #         JOIN taxon_names tnn ON atu.taxon_name_id = tnn.id
+            #         LEFT JOIN api_common_name acn ON t.taxon_id = acn.taxon_id
+            #         LEFT JOIN api_names an ON t.accepted_taxon_name_id = an.taxon_name_id 
+            #         LEFT JOIN api_taxon_tree att ON t.taxon_id = att.taxon_id 
+            #         LEFT JOIN api_conservation ac ON t.taxon_id = ac.taxon_id """
             
-            info_query = """
-                    SELECT distinct t.taxon_id, t.rank_id, t.accepted_taxon_name_id, acn.name_c, GROUP_CONCAT(distinct acnn.name_c SEPARATOR ',') as alternative_name_c, 
-                    t.is_hybrid, t.is_endemic, t.is_in_taiwan, t.alien_type, t.is_fossil, t.is_terrestrial, 
-                    t.is_freshwater, t.is_brackish, t.is_marine, ac.cites_listing, ac.iucn_category, ac.red_category, 
-                    ac.protected_category, ac.sensitive_suggest, 
-                    t.created_at, t.updated_at, tn.name, an.name_author, an.formatted_name, t.is_deleted, t.new_taxon_id FROM api_taxon t 
-                    JOIN taxon_names tn ON t.accepted_taxon_name_id = tn.id 
-                    JOIN api_taxon_usages atu ON t.taxon_id = atu.taxon_id
-                    JOIN taxon_names tnn ON atu.taxon_name_id = tnn.id
-                    LEFT JOIN api_taxon_tree att ON t.taxon_id = att.taxon_id 
-                    LEFT JOIN api_common_name acn ON t.taxon_id = acn.taxon_id and acn.is_primary = 1
-                    LEFT JOIN api_common_name acnn ON t.taxon_id = acnn.taxon_id and acnn.is_primary = 0
-                    LEFT JOIN api_names an ON t.accepted_taxon_name_id = an.taxon_name_id 
-                    LEFT JOIN api_conservation ac ON t.taxon_id = ac.taxon_id WHERE t.taxon_id in (SELECT taxon_id FROM base_query)
-                    GROUP BY t.taxon_id, t.rank_id, t.accepted_taxon_name_id, acn.name_c, 
-                    t.is_hybrid, t.is_endemic, t.is_in_taiwan, t.alien_type, t.is_fossil, t.is_terrestrial, 
-                    t.is_freshwater, t.is_brackish, t.is_marine, ac.cites_listing, ac.iucn_category, ac.red_category, 
-                    ac.protected_category, ac.sensitive_suggest, 
-                    t.created_at, t.updated_at, tn.name, an.name_author, an.formatted_name, t.is_deleted, t.new_taxon_id
-                    """
+            # api_common_name -> 如果有查中文名
+            # api_taxon_tree -> 如果有查taxon_group
+            # api_names -> 查詢時不需要
+            # taxon_names -> 如果有查name 但先不用join兩次
+            # api_taxon_usages -> 如果有查name
+            # api_conservation -> 如果有查 api_conservation
 
-            count_query = """SELECT COUNT(distinct(t.taxon_id)) FROM api_taxon t
-                            JOIN taxon_names tn ON t.accepted_taxon_name_id = tn.id 
-                            JOIN api_taxon_usages atu ON t.taxon_id = atu.taxon_id
-                            JOIN taxon_names tnn ON atu.taxon_name_id = tnn.id
-                            LEFT JOIN api_common_name acn ON t.taxon_id = acn.taxon_id
-                            LEFT JOIN api_names an ON t.accepted_taxon_name_id = an.taxon_name_id 
-                            LEFT JOIN api_conservation ac ON t.taxon_id = ac.taxon_id
-                            LEFT JOIN api_taxon_tree att ON t.taxon_id = att.taxon_id 
-                        """
+            # count_query = """SELECT COUNT(distinct(t.taxon_id)) FROM api_taxon t
+            #                 JOIN taxon_names tn ON t.accepted_taxon_name_id = tn.id 
+            #                 JOIN api_taxon_usages atu ON t.taxon_id = atu.taxon_id
+            #                 JOIN taxon_names tnn ON atu.taxon_name_id = tnn.id
+            #                 LEFT JOIN api_common_name acn ON t.taxon_id = acn.taxon_id
+            #                 LEFT JOIN api_names an ON t.accepted_taxon_name_id = an.taxon_name_id 
+            #                 LEFT JOIN api_conservation ac ON t.taxon_id = ac.taxon_id
+            #                 LEFT JOIN api_taxon_tree att ON t.taxon_id = att.taxon_id 
+            #             """
+
 
             if taxon_id:  # 不考慮其他條件
-                query = f"{query} WHERE t.taxon_id = '{taxon_id}'"
-                count_query = f"{count_query} WHERE t.taxon_id = '{taxon_id}'"
+                base_query = f"WITI base_query AS (SELECT t.* FROM FROM api_taxon t WHERE t.taxon_id = '{taxon_id}')"
+                count_query = f"SELECT count(*) FROM api_taxon t WHERE t.taxon_id = '{taxon_id}'"
             else:
                 conditions = [] # 在query中 和 info_query是分開的
 
+                # base_query = f"WITH base_query AS (SELET t.taxon_id FROM api_taxon t order by id limit {limit} offset {offset})"
+                # join_usage_and_name = False
+                # join_common_name = False
+                name_taxon_id = []
+                common_name_taxon_id = []
+                join_conserv = False
+                join_taxon_tree = False
+
                 # 學名 scientific_name 可能是接受/非接受/誤用
                 if sci_name := request.GET.get('scientific_name', ''):
-                    conditions += [f"tnn.name = '{sci_name}'"]
+                    # 先query一次
+                    name_query = """
+                                SELECT distinct (taxon_id) FROM api_taxon_usages where is_deleted = 0 and taxon_name_id IN ( 
+                                    SELECT id
+                                    FROM taxon_names 
+                                    WHERE deleted_at is null AND `name` = %s)
+                                """
+                    with conn.cursor() as cursor:
+                        cursor.execute(name_query, (sci_name, ))
+                        name_taxon_id = cursor.fetchall()
+                        name_taxon_id = [n[0] for n in name_taxon_id]
 
                 # 俗名 common_name
                 if common_name := request.GET.get('common_name', ''):
                     common_name = get_variants(common_name)
-                    conditions += [f"acn.name_c = '{common_name}'"]
+                    common_name_query = """
+                            SELECT distinct taxon_id
+                            FROM api_common_name  
+                            WHERE name_c REGEXP %s
+                        """
+                    
+                    with conn.cursor() as cursor:
+                        cursor.execute(common_name_query, (common_name, ))
+                        common_name_taxon_id = cursor.fetchall()
+                        common_name_taxon_id = [n[0] for n in common_name_taxon_id]
 
+                if name_taxon_id and common_name_taxon_id:
+                    # 要找兩個的交集
+                    preselect_taxon_id = list(set(name_taxon_id).intersection(common_name_taxon_id))
+                else:
+                    preselect_taxon_id = name_taxon_id + common_name_taxon_id
+
+                if preselect_taxon_id:
+                    conditions += [f"t.taxon_id IN {str(preselect_taxon_id).replace('[','(').replace(']',')')}"]
+
+
+                # 直接查taxon的表 不需要join
                 for i in ['is_hybrid', 'is_endemic', 'is_in_taiwan', 'is_fossil', 'is_terrestrial', 'is_freshwater', 'is_brackish', 'is_marine']:
                     var = request.GET.get(i, '').strip()
                     if var == 'true' or var == '1':
                         conditions += [f"t.{i} = 1"]
                     elif var == 'false' or var == '0':
                         conditions += [f"t.{i} = 0"]
+                    
                 if var := request.GET.get('alien_type', '').strip():
                     conditions += ['''JSON_CONTAINS(t.alien_type, '{"alien_type":"''' + var + '''"}')  > 0''']
 
@@ -784,7 +809,6 @@ class TaxonView(APIView):
                         response = {"status": {"code": 400, "message": "Bad Request: Incorrect DATE(created_at) value"}}
                         return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
                     conditions += [f"date(t.created_at) > '{created_at}'"]
-
 
                 if rank := request.GET.get('rank'):
                     try:
@@ -805,6 +829,7 @@ class TaxonView(APIView):
                             cs_list.append(f'ac.red_category = "{redlist_map.get(css)}"')
                     if cs_list:
                         conditions.append(f"({' OR '.join(cs_list)})")
+                        join_conserv = True
 
                 if cs := request.GET.getlist('protected'):
                     cs_list = []
@@ -815,6 +840,7 @@ class TaxonView(APIView):
                             cs_list.append(f'ac.protected_category = "{css}"')
                     if cs_list:
                         conditions.append(f"({' OR '.join(cs_list)})")
+                        join_conserv = True
 
                 if cs := request.GET.getlist('iucn'):
                     cs_list = []
@@ -825,6 +851,7 @@ class TaxonView(APIView):
                             cs_list.append(f'ac.iucn_category = "{css}"')
                     if cs_list:
                         conditions.append(f"({' OR '.join(cs_list)})")
+                        join_conserv = True
 
                 if cs := request.GET.getlist('sensitive'):
                     cs_list = []
@@ -835,6 +862,7 @@ class TaxonView(APIView):
                             cs_list.append(f'ac.sensitive_suggest = "{css}"')
                     if cs_list:
                         conditions.append(f"({' OR '.join(cs_list)})")
+                        join_conserv = True
 
                 # CITES類別要用like
                 if cs := request.GET.getlist('cites'):
@@ -847,39 +875,90 @@ class TaxonView(APIView):
                             cs_list.append(f'ac.cites_listing like "%{cites_map.get(css)}%"')
                     if cs_list:
                         conditions.append(f"({' OR '.join(cs_list)})")
+                        join_conserv = True
 
                 if taxon_group:
                     # 先抓taxon_id再判斷有沒有其他condition要考慮
                     query_1 = f"""SELECT t.taxon_id FROM taxon_names tn 
                                 JOIN api_taxon t ON tn.id = t.accepted_taxon_name_id 
                                 LEFT JOIN api_common_name acn ON acn.taxon_id = t.taxon_id  
-                                WHERE tn.name = %s OR acn.name_c = %s"""
+                                WHERE tn.name = %s OR acn.name_c REGEXP %s"""
                     with conn.cursor() as cursor:
-                        cursor.execute(query_1, (taxon_group, taxon_group))
+                        cursor.execute(query_1, (taxon_group, get_variants(taxon_group)))
                         t_id = cursor.fetchall()           
                         if len(t_id):
                             # 可能不只一筆
                             t_str = [ f"att.path like '%>{t[0]}%'" for t in t_id]
                             conditions.append(f"({' OR '.join(t_str)})")
+                            join_taxon_tree = True
                         else:  # 如果沒有結果的話用回傳空值
                             response = {"status": {"code": 200, "message": "Success"},
                                         "info": {"total": 0, "limit": limit, "offset": offset}, "data": []}
                             return HttpResponse(json.dumps(response, ensure_ascii=False, cls=DateTimeEncoder), content_type="application/json,charset=utf-8")
 
-                for l in range(len(conditions)):
-                    if l == 0:
-                        query = f"{query} WHERE {conditions[l]}"
-                        count_query = f"{count_query} WHERE {conditions[l]}"
-                    else:
-                        query += f' AND {conditions[l]}'
-                        count_query += f" AND {conditions[l]}"
+                if len(conditions):
+                    for l in range(len(conditions)):
+                        if l == 0:
+                            cond_str = f"WHERE {conditions[l]}"
+                            # query = f"{query} WHERE {conditions[l]}"
+                            # count_query = f"{count_query} WHERE {conditions[l]}"
+                        else:
+                            cond_str += f' AND {conditions[l]}'
+                            # query += f' AND {conditions[l]}'
+                            # count_query += f" AND {conditions[l]}"
 
+                    base_query = f'''WITH base_query AS (
+                                    SELECT t.* FROM api_taxon t
+                                    {'LEFT JOIN api_taxon_tree att ON t.taxon_id = att.taxon_id' if join_taxon_tree else ''}
+                                    {'LEFT JOIN api_conservation ac ON t.taxon_id = ac.taxon_id' if join_conserv else ''}
+                                    {cond_str}
+                                    ORDER BY t.id  LIMIT {limit} OFFSET {offset} )'''
+                    count_query = f'''
+                                    SELECT count(*) FROM api_taxon t 
+                                    {'LEFT JOIN api_taxon_tree att ON t.taxon_id = att.taxon_id' if join_taxon_tree else ''}
+                                    {'LEFT JOIN api_conservation ac ON t.taxon_id = ac.taxon_id' if join_conserv else ''}
+                                    {cond_str}
+                                    '''
+                    
+
+                else:
+                    # 如果沒有任何condition 直接 limit offset
+                    base_query = f"WITH base_query AS (SELECT t.* FROM api_taxon t ORDER BY t.id LIMIT {limit} OFFSET {offset}) "
+                    count_query = f"SELECT count(*) FROM api_taxon"
+
+            # 最後整理回傳資料使用
+            info_query = """
+                    SELECT t.taxon_id, t.rank_id, t.accepted_taxon_name_id, acn.name_c, GROUP_CONCAT(distinct acnn.name_c SEPARATOR ',') as alternative_name_c, 
+                        t.is_hybrid, t.is_endemic, t.is_in_taiwan, t.alien_type, t.is_fossil, t.is_terrestrial, 
+                        t.is_freshwater, t.is_brackish, t.is_marine, ac.cites_listing, ac.iucn_category, ac.red_category, 
+                        ac.protected_category, ac.sensitive_suggest, 
+                        t.created_at, t.updated_at, tn.name, an.name_author, an.formatted_name, t.is_deleted, t.new_taxon_id 
+                    FROM base_query t 
+                        JOIN taxon_names tn ON t.accepted_taxon_name_id = tn.id 
+                        LEFT JOIN api_taxon_tree att ON t.taxon_id = att.taxon_id 
+                        LEFT JOIN api_common_name acn ON t.taxon_id = acn.taxon_id and acn.is_primary = 1
+                        LEFT JOIN api_common_name acnn ON t.taxon_id = acnn.taxon_id and acnn.is_primary = 0
+                        LEFT JOIN api_names an ON t.accepted_taxon_name_id = an.taxon_name_id 
+                        LEFT JOIN api_conservation ac ON t.taxon_id = ac.taxon_id 
+                        GROUP BY t.taxon_id, t.rank_id, t.accepted_taxon_name_id, acn.name_c, 
+                            t.is_hybrid, t.is_endemic, t.is_in_taiwan, t.alien_type, t.is_fossil, t.is_terrestrial, 
+                            t.is_freshwater, t.is_brackish, t.is_marine, ac.cites_listing, ac.iucn_category, ac.red_category, 
+                            ac.protected_category, ac.sensitive_suggest, 
+                            t.created_at, t.updated_at, tn.name, an.name_author, an.formatted_name, t.is_deleted, t.new_taxon_id
+
+                    """
+                    # JOIN api_taxon_usages atu ON t.taxon_id = atu.taxon_id
+                    # JOIN taxon_names tnn ON atu.taxon_name_id = tnn.id
+                    # GROUP BY t.taxon_id, t.rank_id, t.accepted_taxon_name_id, acn.name_c, 
+                    # t.is_hybrid, t.is_endemic, t.is_in_taiwan, t.alien_type, t.is_fossil, t.is_terrestrial, 
+                    # t.is_freshwater, t.is_brackish, t.is_marine, ac.cites_listing, ac.iucn_category, ac.red_category, 
+                    # ac.protected_category, ac.sensitive_suggest, 
+                    # t.created_at, t.updated_at, tn.name, an.name_author, an.formatted_name, t.is_deleted, t.new_taxon_id
             with conn.cursor() as cursor:
                 cursor.execute(count_query)
                 len_total = cursor.fetchall()[0][0]
-                query += f' LIMIT {limit} OFFSET {offset})'  # 只處理限制筆數
-                query += info_query
-                print(query)
+                # query += f' LIMIT {limit} OFFSET {offset})'  # 只處理限制筆數
+                query = base_query + info_query
                 cursor.execute(query)
                 df = pd.DataFrame(cursor.fetchall(), columns=['taxon_id', 'rank', 'name_id', 'common_name_c', 'alternative_name_c',
                                                               'is_hybrid', 'is_endemic', 'is_in_taiwan', 'alien_type', 'is_fossil', 'is_terrestrial',
