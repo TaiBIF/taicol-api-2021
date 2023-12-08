@@ -1226,7 +1226,7 @@ class NameView(APIView):
                     for n in df.index:
                         name = {'latin_genus': df.latin_genus[n], 'latin_s1': df.latin_s1[n]}
                         count = 2
-                        for s in eval(df.species_layers[n]):
+                        for s in json.loads(df.species_layers[n]):
                             if s.get('rank_abbreviation') and s.get('latin_name'):
                                 name.update({f's{count}_rank': s.get('rank_abbreviation'), f'latin_s{count}': s.get('latin_name')})
                                 count += 1
