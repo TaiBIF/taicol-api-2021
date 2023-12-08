@@ -495,41 +495,42 @@ class HigherTaxaView(APIView):
                     info = cursor.fetchone()
 
                 if info:
-                    path = info[1].split('>')              
-                    query = f"""SELECT t.taxon_id, t.accepted_taxon_name_id, tn.name, 
-                            an.name_author, an.formatted_name, t.rank_id, acn.name_c 
-                            FROM api_taxon t 
-                            LEFT JOIN api_common_name acn ON acn.taxon_id = t.taxon_id AND acn.is_primary = 1
-                            JOIN taxon_names tn ON t.accepted_taxon_name_id = tn.id 
-                            JOIN api_names an ON t.accepted_taxon_name_id = an.taxon_name_id 
-                            WHERE t.taxon_id IN %s 
-                            ORDER BY t.rank_id DESC"""
-                    with conn.cursor() as cursor:
-                        cursor.execute(query, (path,))
-                        higher = cursor.fetchall()
-                        higher = pd.DataFrame(higher, columns=['taxon_id','name_id','simple_name','name_author',
-                                                'formatted_name','rank_id','common_name_c'])
-                        
-                    # 補上階層未定 
-                    # 先找出應該要有哪些林奈階層
-                    current_ranks = higher.rank_id.to_list() + [info[0]]
-                    for x in lin_map.keys():
-                        if x not in current_ranks and x < max(current_ranks) and x > min(current_ranks):
-                            higher = pd.concat([higher, pd.Series({'rank_id': x, 'common_name_c': '地位未定', 'taxon_id': None, 
-                                                                'name_id': None, 'name_author': None }).to_frame().T], ignore_index=True)
-                    # 從最大的rank開始補
-                    higher = higher.sort_values('rank_id', ignore_index=True, ascending=False)
-                    for hi in higher[higher.taxon_id.isnull()].index:
-                        found_hi = hi + 1
-                        while not higher.loc[found_hi].taxon_id:
-                            found_hi += 1
-                        higher.loc[hi, 'formatted_name'] = f'{higher.loc[found_hi].formatted_name} {lin_map[higher.loc[hi].rank_id]} incertae sedis'
-                        higher.loc[hi, 'simple_name'] = f'{higher.loc[found_hi].simple_name} {lin_map[higher.loc[hi].rank_id]} incertae sedis'
-                    higher['rank'] = higher['rank_id'].apply(lambda x: rank_map[x])
-                    higher = higher.replace({np.nan: None, '': None})
-                    higher['name_id'] = higher['name_id'].replace({np.nan: 0}).astype('int64').replace({0: None})
-                    # higher = higher.sort_values('rank_id', ignore_index=True, ascending=True)
-                    data = higher[['taxon_id','name_id','simple_name','name_author','formatted_name','rank','common_name_c']].to_dict(orient='records')
+                    if info[1]:
+                        path = info[1].split('>')              
+                        query = f"""SELECT t.taxon_id, t.accepted_taxon_name_id, tn.name, 
+                                an.name_author, an.formatted_name, t.rank_id, acn.name_c 
+                                FROM api_taxon t 
+                                LEFT JOIN api_common_name acn ON acn.taxon_id = t.taxon_id AND acn.is_primary = 1
+                                JOIN taxon_names tn ON t.accepted_taxon_name_id = tn.id 
+                                JOIN api_names an ON t.accepted_taxon_name_id = an.taxon_name_id 
+                                WHERE t.taxon_id IN %s 
+                                ORDER BY t.rank_id DESC"""
+                        with conn.cursor() as cursor:
+                            cursor.execute(query, (path,))
+                            higher = cursor.fetchall()
+                            higher = pd.DataFrame(higher, columns=['taxon_id','name_id','simple_name','name_author',
+                                                    'formatted_name','rank_id','common_name_c'])
+                            
+                        # 補上階層未定 
+                        # 先找出應該要有哪些林奈階層
+                        current_ranks = higher.rank_id.to_list() + [info[0]]
+                        for x in lin_map.keys():
+                            if x not in current_ranks and x < max(current_ranks) and x > min(current_ranks):
+                                higher = pd.concat([higher, pd.Series({'rank_id': x, 'common_name_c': '地位未定', 'taxon_id': None, 
+                                                                    'name_id': None, 'name_author': None }).to_frame().T], ignore_index=True)
+                        # 從最大的rank開始補
+                        higher = higher.sort_values('rank_id', ignore_index=True, ascending=False)
+                        for hi in higher[higher.taxon_id.isnull()].index:
+                            found_hi = hi + 1
+                            while not higher.loc[found_hi].taxon_id:
+                                found_hi += 1
+                            higher.loc[hi, 'formatted_name'] = f'{higher.loc[found_hi].formatted_name} {lin_map[higher.loc[hi].rank_id]} incertae sedis'
+                            higher.loc[hi, 'simple_name'] = f'{higher.loc[found_hi].simple_name} {lin_map[higher.loc[hi].rank_id]} incertae sedis'
+                        higher['rank'] = higher['rank_id'].apply(lambda x: rank_map[x])
+                        higher = higher.replace({np.nan: None, '': None})
+                        higher['name_id'] = higher['name_id'].replace({np.nan: 0}).astype('int64').replace({0: None})
+                        # higher = higher.sort_values('rank_id', ignore_index=True, ascending=True)
+                        data = higher[['taxon_id','name_id','simple_name','name_author','formatted_name','rank','common_name_c']].to_dict(orient='records')
             response = {"status": {"code": 200, "message": "Success"},
                         "data": data}
         except Exception as er:
@@ -860,24 +861,6 @@ class TaxonView(APIView):
                             # 可能不只一筆
                             t_str = [ f"att.path like '%>{t[0]}%'" for t in t_id]
                             conditions.append(f"({' OR '.join(t_str)})")
-                            # query_2 = "SELECT taxon_id FROM api_taxon_tree WHERE"
-                            # t_count = 0
-                            # for t in t_id:
-                            #     t_count += 1
-                            #     if t_count == 1:
-                            #         query_2 += f" path like '%>{t[0]}%' or taxon_id = '{t[0]}'"
-                            #     else:
-                            #         query_2 += f" or path like '%>{t[0]}%' or taxon_id = '{t[0]}'"
-                            # if t_count > 0:
-                            #     with conn.cursor() as cursor:
-                            #         cursor.execute(query_2)
-                            #         results = cursor.fetchall()
-                            #         if results:
-                            #             results = str([i[0] for i in results]).replace('[', '(').replace(']', ')')
-                            # else:  # 如果沒有結果的話用回傳空值
-                            #     response = {"status": {"code": 200, "message": "Success"},
-                            #                 "info": {"total": 0, "limit": limit, "offset": offset}, "data": []}
-                            #     return HttpResponse(json.dumps(response, ensure_ascii=False, cls=DateTimeEncoder), content_type="application/json,charset=utf-8")
                         else:  # 如果沒有結果的話用回傳空值
                             response = {"status": {"code": 200, "message": "Success"},
                                         "info": {"total": 0, "limit": limit, "offset": offset}, "data": []}
@@ -896,6 +879,7 @@ class TaxonView(APIView):
                 len_total = cursor.fetchall()[0][0]
                 query += f' LIMIT {limit} OFFSET {offset})'  # 只處理限制筆數
                 query += info_query
+                print(query)
                 cursor.execute(query)
                 df = pd.DataFrame(cursor.fetchall(), columns=['taxon_id', 'rank', 'name_id', 'common_name_c', 'alternative_name_c',
                                                               'is_hybrid', 'is_endemic', 'is_in_taiwan', 'alien_type', 'is_fossil', 'is_terrestrial',
@@ -1157,6 +1141,7 @@ class NameView(APIView):
                                                'type_name_id', 'latin_genus', 'latin_s1', 'species_layers', 'formatted_name', 'namecode', 'is_deleted'])
                 cursor.execute(count_query)
                 len_total = cursor.fetchall()[0][0]
+
 
                 # print(query)
                 # print(count_query)
