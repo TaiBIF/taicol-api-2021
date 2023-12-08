@@ -893,8 +893,11 @@ class TaxonView(APIView):
                     # 階層
                     df['rank'] = df['rank'].apply(lambda x: rank_map[x])
                     # 日期格式 yy-mm-dd
-                    df['created_at'] = df.created_at.dt.strftime('%Y-%m-%d')
-                    df['updated_at'] = df.updated_at.dt.strftime('%Y-%m-%d')
+                    # df['created_at'] = df.created_at.dt.strftime('%Y-%m-%d')
+                    # df['updated_at'] = df.updated_at.dt.strftime('%Y-%m-%d')
+                    df['created_at'] = df.created_at.apply(lambda x: str(x).split(' ')[0])
+                    df['updated_at'] = df.updated_at.apply(lambda x: str(x).split(' ')[0])
+
                     # 同物異名 & 誤用名
                     df['synonyms'] = ''
                     df['formatted_synonyms'] = ''
@@ -1211,8 +1214,10 @@ class NameView(APIView):
                     df['taxon'] = df['taxon'].apply(json.loads)
 
                     # 日期格式 yy-mm-dd
-                    df['created_at'] = df.created_at.dt.strftime('%Y-%m-%d')
-                    df['updated_at'] = df.updated_at.dt.strftime('%Y-%m-%d')
+                    # df['created_at'] = df.created_at.dt.strftime('%Y-%m-%d')
+                    # df['updated_at'] = df.updated_at.dt.strftime('%Y-%m-%d')
+                    df['created_at'] = df.created_at.apply(lambda x: str(x).split(' ')[0])
+                    df['updated_at'] = df.updated_at.apply(lambda x: str(x).split(' ')[0])
 
                     # 是否已刪除
                     df['is_deleted'] = df.is_deleted.apply(lambda x: True if x else False)
