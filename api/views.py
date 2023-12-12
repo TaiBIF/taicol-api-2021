@@ -737,7 +737,7 @@ class TaxonView(APIView):
 
 
             if taxon_id:  # 不考慮其他條件
-                base_query = f"WITI base_query AS (SELECT t.* FROM FROM api_taxon t WHERE t.taxon_id = '{taxon_id}')"
+                base_query = f"WITH base_query AS (SELECT * FROM api_taxon t WHERE t.taxon_id = '{taxon_id}')"
                 count_query = f"SELECT count(*) FROM api_taxon t WHERE t.taxon_id = '{taxon_id}'"
             else:
                 conditions = [] # 在query中 和 info_query是分開的
@@ -959,6 +959,7 @@ class TaxonView(APIView):
                 len_total = cursor.fetchall()[0][0]
                 # query += f' LIMIT {limit} OFFSET {offset})'  # 只處理限制筆數
                 query = base_query + info_query
+                print(query)
                 cursor.execute(query)
                 df = pd.DataFrame(cursor.fetchall(), columns=['taxon_id', 'rank', 'name_id', 'common_name_c', 'alternative_name_c',
                                                               'is_hybrid', 'is_endemic', 'is_in_taiwan', 'alien_type', 'is_fossil', 'is_terrestrial',
