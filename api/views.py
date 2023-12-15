@@ -1124,12 +1124,13 @@ class NameView(APIView):
                             tn.properties ->> '$.latin_genus', \
                             tn.properties ->> '$.latin_s1',\
                             tn.properties ->> '$.species_layers',\
-                            an.formatted_name,  anc.namecode, tn.deleted_at\
+                            an.formatted_name, GROUP_CONCAT(anc.namecode), tn.deleted_at\
                             FROM base_query AS tn \
                             JOIN nomenclatures n ON tn.nomenclature_id = n.id \
                             LEFT JOIN api_namecode anc ON tn.id = anc.taxon_name_id \
                             LEFT JOIN api_names an ON tn.id = an.taxon_name_id \
-                            LEFT JOIN api_citations c ON tn.reference_id = c.reference_id"
+                            LEFT JOIN api_citations c ON tn.reference_id = c.reference_id \
+                            GROUP BY tn.id ORDER BY tn.id "
             count_query = "SELECT COUNT(*) FROM taxon_names tn"
 
             conditions = []
