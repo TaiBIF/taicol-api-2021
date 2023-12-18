@@ -695,7 +695,7 @@ class TaxonView(APIView):
                 list(request.GET.keys())) <= set(
                 ['taxon_id', 'scientific_name', 'common_name', 'taxon_group', 'updated_at', 'created_at', 'limit', 'offset', 'is_hybrid', 'is_endemic', 
                 'is_in_taiwan', 'alien_type', 'is_fossil', 'is_terrestrial', 'is_freshwater', 'is_brackish', 'is_marine',
-                'protected','redlist','iucn', 'cites', 'rank', 'sensitive']):
+                'protected','redlist','iucn', 'cites', 'rank', 'sensitive','including_not_official']):
                 response = {"status": {"code": 400, "message": "Bad Request: Unsupported parameters"}}
                 return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
 
@@ -705,6 +705,7 @@ class TaxonView(APIView):
             taxon_group = request.GET.get('taxon_group', '').strip()
             updated_at = request.GET.get('updated_at', '').strip().strip('"').strip("'")
             created_at = request.GET.get('created_at', '').strip().strip('"').strip("'")
+            including_not_official = request.GET.get('including_not_official', 'false')
             limit = 300 if limit > 300 else limit  # 最大值 300
 
             conn = pymysql.connect(**db_settings)
@@ -741,6 +742,10 @@ class TaxonView(APIView):
                 count_query = f"SELECT count(*) FROM api_taxon t WHERE t.taxon_id = '{taxon_id}'"
             else:
                 conditions = [] # 在query中 和 info_query是分開的
+
+                if including_not_official == 'false': # false: 排除未經正式紀錄
+                    conditions += ["t.not_official != 0"]
+
 
                 # base_query = f"WITH base_query AS (SELET t.taxon_id FROM api_taxon t order by id limit {limit} offset {offset})"
                 # join_usage_and_name = False
@@ -932,7 +937,7 @@ class TaxonView(APIView):
                         t.is_hybrid, t.is_endemic, t.is_in_taiwan, t.alien_type, t.is_fossil, t.is_terrestrial, 
                         t.is_freshwater, t.is_brackish, t.is_marine, ac.cites_listing, ac.iucn_category, ac.red_category, 
                         ac.protected_category, ac.sensitive_suggest, 
-                        t.created_at, t.updated_at, tn.name, an.name_author, an.formatted_name, t.is_deleted, t.new_taxon_id 
+                        t.created_at, t.updated_at, tn.name, an.name_author, an.formatted_name, t.is_deleted, t.new_taxon_id, t.not_official
                     FROM base_query t 
                         JOIN taxon_names tn ON t.accepted_taxon_name_id = tn.id 
                         LEFT JOIN api_taxon_tree att ON t.taxon_id = att.taxon_id 
@@ -944,7 +949,7 @@ class TaxonView(APIView):
                             t.is_hybrid, t.is_endemic, t.is_in_taiwan, t.alien_type, t.is_fossil, t.is_terrestrial, 
                             t.is_freshwater, t.is_brackish, t.is_marine, ac.cites_listing, ac.iucn_category, ac.red_category, 
                             ac.protected_category, ac.sensitive_suggest, 
-                            t.created_at, t.updated_at, tn.name, an.name_author, an.formatted_name, t.is_deleted, t.new_taxon_id
+                            t.created_at, t.updated_at, tn.name, an.name_author, an.formatted_name, t.is_deleted, t.new_taxon_id, t.not_official
 
                     """
                     # JOIN api_taxon_usages atu ON t.taxon_id = atu.taxon_id
@@ -959,16 +964,15 @@ class TaxonView(APIView):
                 len_total = cursor.fetchall()[0][0]
                 # query += f' LIMIT {limit} OFFSET {offset})'  # 只處理限制筆數
                 query = base_query + info_query
-                print(query)
                 cursor.execute(query)
                 df = pd.DataFrame(cursor.fetchall(), columns=['taxon_id', 'rank', 'name_id', 'common_name_c', 'alternative_name_c',
                                                               'is_hybrid', 'is_endemic', 'is_in_taiwan', 'alien_type', 'is_fossil', 'is_terrestrial',
                                                               'is_freshwater', 'is_brackish', 'is_marine', 'cites', 'iucn', 'redlist', 'protected', 'sensitive',
-                                                              'created_at', 'updated_at', 'simple_name', 'name_author', 'formatted_name', 'is_deleted', 'new_taxon_id'])
+                                                              'created_at', 'updated_at', 'simple_name', 'name_author', 'formatted_name', 'is_deleted', 'new_taxon_id', 'not_official'])
                 # 0, 1 要轉成true, false (但可能會有null)
                 if len(df):
                     df = df.replace({np.nan: None})
-                    is_list = ['is_in_taiwan','is_hybrid', 'is_endemic', 'is_fossil', 'is_terrestrial', 'is_freshwater', 'is_brackish', 'is_marine']
+                    is_list = ['is_in_taiwan','is_hybrid', 'is_endemic', 'is_fossil', 'is_terrestrial', 'is_freshwater', 'is_brackish', 'is_marine', 'not_official']
                     df[is_list] = df[is_list].replace({0: False, 1: True, '0': False, '1': True})
                     # 階層
                     df['rank'] = df['rank'].apply(lambda x: rank_map[x])
@@ -1017,7 +1021,7 @@ class TaxonView(APIView):
                     # 排序
                     df = df[['taxon_id', 'taxon_status', 'name_id', 'simple_name', 'name_author', 'formatted_name', 'synonyms', 'formatted_synonyms', 'misapplied', 'formatted_misapplied',
                             'rank', 'common_name_c', 'alternative_name_c', 'is_hybrid', 'is_endemic', 'is_in_taiwan', 'alien_type', 'is_fossil', 'is_terrestrial', 'is_freshwater', 'is_brackish',
-                             'is_marine', 'cites', 'iucn', 'redlist', 'protected', 'sensitive', 'created_at', 'updated_at', 'new_taxon_id']]
+                             'is_marine','not_official', 'cites', 'iucn', 'redlist', 'protected', 'sensitive', 'created_at', 'updated_at', 'new_taxon_id']]
 
                     df = df.replace({np.nan: None, '': None})
                     df['name_id'] = df['name_id'].replace({np.nan: 0}).astype('int64').replace({0: None})
