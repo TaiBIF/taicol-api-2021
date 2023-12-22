@@ -744,7 +744,7 @@ class TaxonView(APIView):
                 conditions = [] # 在query中 和 info_query是分開的
 
                 if including_not_official == 'false': # false: 排除未經正式紀錄
-                    conditions += ["t.not_official != 0"]
+                    conditions += ["t.not_official != 1"]
 
 
                 # base_query = f"WITH base_query AS (SELET t.taxon_id FROM api_taxon t order by id limit {limit} offset {offset})"
