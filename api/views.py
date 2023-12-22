@@ -705,7 +705,7 @@ class TaxonView(APIView):
             taxon_group = request.GET.get('taxon_group', '').strip()
             updated_at = request.GET.get('updated_at', '').strip().strip('"').strip("'")
             created_at = request.GET.get('created_at', '').strip().strip('"').strip("'")
-            including_not_official = request.GET.get('including_not_official', 'false')
+            including_not_official = request.GET.get('including_not_official', 'true')
             limit = 300 if limit > 300 else limit  # 最大值 300
 
             conn = pymysql.connect(**db_settings)
@@ -962,8 +962,8 @@ class TaxonView(APIView):
             with conn.cursor() as cursor:
                 cursor.execute(count_query)
                 len_total = cursor.fetchall()[0][0]
-                # query += f' LIMIT {limit} OFFSET {offset})'  # 只處理限制筆數
                 query = base_query + info_query
+
                 cursor.execute(query)
                 df = pd.DataFrame(cursor.fetchall(), columns=['taxon_id', 'rank', 'name_id', 'common_name_c', 'alternative_name_c',
                                                               'is_hybrid', 'is_endemic', 'is_in_taiwan', 'alien_type', 'is_fossil', 'is_terrestrial',
