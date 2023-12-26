@@ -17,22 +17,27 @@ services:
     stdin_open: true
     env_file:
       - .env
-  nginx:
-    image: nginx
-    restart: always
-    ports:
-      - 80:80
-      - 443:443
-    volumes:
-      - ./scripts/nginx-django.conf:/etc/nginx/conf.d/nginx-django.conf
-      # - ./taicol-volumes/logs/nginx:/var/log/nginx
-      - ../taicol-volumes/static:/code/conf/static
-      # - ../taicol-volumes/certbot/conf:/etc/letsencrypt
-      # - ../taicol-volumes/certbot/www:/var/www/certbot
-    links:
-      - web:web
-    command: "/bin/sh -c 'while :; do sleep 6h & wait $${!}; nginx -s reload; done &
-      nginx -g \"daemon off;\"'"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.whoami.rule=Host(`api-staging.taicol.tw`)"
+      - "traefik.http.routers.whoami.entrypoints=websecure"
+      - "traefik.http.routers.whoami.tls.certresolver=myresolver"
+  # nginx:
+  #   image: nginx
+  #   restart: always
+  #   ports:
+  #     - 80:80
+  #     - 443:443
+  #   volumes:
+  #     - ./scripts/nginx-django.conf:/etc/nginx/conf.d/nginx-django.conf
+  #     # - ./taicol-volumes/logs/nginx:/var/log/nginx
+  #     - ../taicol-volumes/static:/code/conf/static
+  #     # - ../taicol-volumes/certbot/conf:/etc/letsencrypt
+  #     # - ../taicol-volumes/certbot/www:/var/www/certbot
+  #   links:
+  #     - web:web
+  #   command: "/bin/sh -c 'while :; do sleep 6h & wait $${!}; nginx -s reload; done &
+  #     nginx -g \"daemon off;\"'"
   mysql:
     build: ./scripts/mysql
     container_name: tc-api-mysql-container
@@ -72,14 +77,14 @@ services:
     volumes:
       - "./letsencrypt:/letsencrypt"
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
-  whoami:
-    image: "traefik/whoami"
-    container_name: "simple-service"
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.whoami.rule=Host(`api-staging.taicol.tw`)"
-      - "traefik.http.routers.whoami.entrypoints=websecure"
-      - "traefik.http.routers.whoami.tls.certresolver=myresolver"
+  # whoami:
+  #   image: "traefik/whoami"
+  #   container_name: "simple-service"
+  #   labels:
+  #     - "traefik.enable=true"
+  #     - "traefik.http.routers.whoami.rule=Host(`api-staging.taicol.tw`)"
+  #     - "traefik.http.routers.whoami.entrypoints=websecure"
+  #     - "traefik.http.routers.whoami.tls.certresolver=myresolver"
 
   # certbot:
   #   image: certbot/certbot
