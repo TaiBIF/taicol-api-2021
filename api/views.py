@@ -1263,19 +1263,18 @@ class NameView(APIView):
 
 
                     # 加上taxon
-
                     with conn.cursor() as cursor:     
                         query = """
                         WITH cte
                             AS
                             (
-                                SELECT distinct atu.taxon_name_id, atu.taxon_id, atu.status, at.is_deleted
+                                SELECT distinct atu.taxon_name_id, atu.taxon_id, atu.status, at.is_in_taiwan
                                 FROM api_taxon_usages atu
                                 LEFT JOIN api_taxon at ON at.taxon_id = atu.taxon_id
-                                WHERE atu.taxon_name_id IN %s 
+                                WHERE atu.taxon_name_id IN %s  and at.is_deleted != 1
                             )
                         SELECT taxon_name_id, 
-                        JSON_ARRAYAGG(JSON_OBJECT('taxon_id', taxon_id, 'status', status, 'is_deleted', is_deleted))
+                        JSON_ARRAYAGG(JSON_OBJECT('taxon_id', taxon_id, 'status', status, 'is_in_taiwan', is_in_taiwan))
                         FROM cte GROUP BY taxon_name_id;
                         """
                         cursor.execute(query, (df.name_id.to_list(),))
@@ -1283,13 +1282,14 @@ class NameView(APIView):
                         for i in taxon_df.index:
                             row = taxon_df.iloc[i]
                             taxon_tmp = json.loads(row.taxon)
-                            taxon_final = []
-                            for t in taxon_tmp:
-                                if t.get('is_deleted'):
-                                    taxon_final.append({'taxon_id': t.get('taxon_id'), 'usage_status': 'deleted'})
-                                elif t.get('taxon_id'):
-                                    taxon_final.append({'taxon_id': t.get('taxon_id'), 'usage_status': t.get('status')})
-                            taxon_df.loc[i,'taxon'] = json.dumps(taxon_final)
+                            taxon_tmp = pd.DataFrame(taxon_tmp)
+                            # 排序規則： 
+                            # Taiwan+有效 accepted
+                            # Taiwan+無效 not-accepted
+                            # Taiwan+誤用 misapplied
+                            custom_dict = {'accepted': 0, 'not-accepted': 1, 'misapplied': 2}
+                            taxon_tmp = taxon_tmp.sort_values(by=['status'], key=lambda x: x.map(custom_dict)).sort_values(by='is_in_taiwan',ascending=False)
+                            taxon_df.loc[i,'taxon'] = taxon_tmp.to_json(orient='records')
 
                     if len(taxon_df):
                         df = df.merge(taxon_df, how='left')    
