@@ -1289,6 +1289,7 @@ class NameView(APIView):
                             # Taiwan+誤用 misapplied
                             custom_dict = {'accepted': 0, 'not-accepted': 1, 'misapplied': 2}
                             taxon_tmp = taxon_tmp.sort_values(by=['status'], key=lambda x: x.map(custom_dict)).sort_values(by='is_in_taiwan',ascending=False)
+                            taxon_tmp = taxon_tmp.rename(columns={'status': 'usage_status'})
                             taxon_df.loc[i,'taxon'] = taxon_tmp.to_json(orient='records')
 
                     if len(taxon_df):
