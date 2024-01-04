@@ -1019,7 +1019,7 @@ class TaxonView(APIView):
                                 FROM api_taxon_usages tu \
                                 JOIN api_names an ON tu.taxon_name_id = an.taxon_name_id \
                                 JOIN taxon_names tn ON tu.taxon_name_id = tn.id \
-                                WHERE tu.taxon_id IN %s and tu.status IN ('not-accepted', 'misapplied');"
+                                WHERE tu.taxon_id IN %s and tu.status IN ('not-accepted', 'misapplied') AND tu.is_deleted != 1;"
                     cursor.execute(query, (df.taxon_id.to_list(),))
                     other_names = cursor.fetchall()
                     other_names = pd.DataFrame(other_names, columns=['taxon_id','status','formatted_name','name'])
