@@ -932,8 +932,27 @@ class TaxonView(APIView):
                     count_query = f"SELECT count(*) FROM api_taxon"
 
             # 最後整理回傳資料使用
+            # info_query = """
+            #         SELECT t.taxon_id, t.rank_id, t.accepted_taxon_name_id, acn.name_c, GROUP_CONCAT(distinct acnn.name_c SEPARATOR ',') as alternative_name_c, 
+            #             t.is_hybrid, t.is_endemic, t.is_in_taiwan, t.alien_type, t.is_fossil, t.is_terrestrial, 
+            #             t.is_freshwater, t.is_brackish, t.is_marine, ac.cites_listing, ac.iucn_category, ac.red_category, 
+            #             ac.protected_category, ac.sensitive_suggest, 
+            #             t.created_at, t.updated_at, tn.name, an.name_author, an.formatted_name, t.is_deleted, t.new_taxon_id, t.not_official
+            #         FROM base_query t 
+            #             JOIN taxon_names tn ON t.accepted_taxon_name_id = tn.id 
+            #             LEFT JOIN api_taxon_tree att ON t.taxon_id = att.taxon_id 
+            #             LEFT JOIN api_common_name acn ON t.taxon_id = acn.taxon_id and acn.is_primary = 1
+            #             LEFT JOIN api_common_name acnn ON t.taxon_id = acnn.taxon_id and acnn.is_primary = 0
+            #             LEFT JOIN api_names an ON t.accepted_taxon_name_id = an.taxon_name_id 
+            #             LEFT JOIN api_conservation ac ON t.taxon_id = ac.taxon_id 
+            #             GROUP BY t.taxon_id, t.rank_id, t.accepted_taxon_name_id, acn.name_c, 
+            #                 t.is_hybrid, t.is_endemic, t.is_in_taiwan, t.alien_type, t.is_fossil, t.is_terrestrial, 
+            #                 t.is_freshwater, t.is_brackish, t.is_marine, ac.cites_listing, ac.iucn_category, ac.red_category, 
+            #                 ac.protected_category, ac.sensitive_suggest, 
+            #                 t.created_at, t.updated_at, tn.name, an.name_author, an.formatted_name, t.is_deleted, t.new_taxon_id, t.not_official
+            #         """
             info_query = """
-                    SELECT t.taxon_id, t.rank_id, t.accepted_taxon_name_id, acn.name_c, GROUP_CONCAT(distinct acnn.name_c SEPARATOR ',') as alternative_name_c, 
+                    SELECT t.taxon_id, t.rank_id, t.accepted_taxon_name_id, acn.name_c, 
                         t.is_hybrid, t.is_endemic, t.is_in_taiwan, t.alien_type, t.is_fossil, t.is_terrestrial, 
                         t.is_freshwater, t.is_brackish, t.is_marine, ac.cites_listing, ac.iucn_category, ac.red_category, 
                         ac.protected_category, ac.sensitive_suggest, 
@@ -942,15 +961,8 @@ class TaxonView(APIView):
                         JOIN taxon_names tn ON t.accepted_taxon_name_id = tn.id 
                         LEFT JOIN api_taxon_tree att ON t.taxon_id = att.taxon_id 
                         LEFT JOIN api_common_name acn ON t.taxon_id = acn.taxon_id and acn.is_primary = 1
-                        LEFT JOIN api_common_name acnn ON t.taxon_id = acnn.taxon_id and acnn.is_primary = 0
                         LEFT JOIN api_names an ON t.accepted_taxon_name_id = an.taxon_name_id 
                         LEFT JOIN api_conservation ac ON t.taxon_id = ac.taxon_id 
-                        GROUP BY t.taxon_id, t.rank_id, t.accepted_taxon_name_id, acn.name_c, 
-                            t.is_hybrid, t.is_endemic, t.is_in_taiwan, t.alien_type, t.is_fossil, t.is_terrestrial, 
-                            t.is_freshwater, t.is_brackish, t.is_marine, ac.cites_listing, ac.iucn_category, ac.red_category, 
-                            ac.protected_category, ac.sensitive_suggest, 
-                            t.created_at, t.updated_at, tn.name, an.name_author, an.formatted_name, t.is_deleted, t.new_taxon_id, t.not_official
-
                     """
                     # JOIN api_taxon_usages atu ON t.taxon_id = atu.taxon_id
                     # JOIN taxon_names tnn ON atu.taxon_name_id = tnn.id
@@ -965,12 +977,22 @@ class TaxonView(APIView):
                 query = base_query + info_query
 
                 cursor.execute(query)
-                df = pd.DataFrame(cursor.fetchall(), columns=['taxon_id', 'rank', 'name_id', 'common_name_c', 'alternative_name_c',
+                df = pd.DataFrame(cursor.fetchall(), columns=['taxon_id', 'rank', 'name_id', 'common_name_c', 
                                                               'is_hybrid', 'is_endemic', 'is_in_taiwan', 'alien_type', 'is_fossil', 'is_terrestrial',
                                                               'is_freshwater', 'is_brackish', 'is_marine', 'cites', 'iucn', 'redlist', 'protected', 'sensitive',
                                                               'created_at', 'updated_at', 'simple_name', 'name_author', 'formatted_name', 'is_deleted', 'new_taxon_id', 'not_official'])
                 # 0, 1 要轉成true, false (但可能會有null)
                 if len(df):
+                    # 在這步取得alternative_common_name
+                    name_c_query = "select name_c, taxon_id from api_common_name where taxon_id IN %s and is_primary = 0"
+                    cursor.execute(name_c_query, (df.taxon_id.to_list(),))
+                    name_c = cursor.fetchall()
+                    if len(name_c):
+                        name_c = pd.DataFrame(name_c, columns=['alternative_name_c', 'taxon_id'])
+                        name_c = name_c.groupby(['taxon_id'], as_index = False).agg({'alternative_name_c': ','.join})
+                        df = df.merge(name_c, how='left')
+                    else:
+                        df['alternative_name_c'] = None
                     df = df.replace({np.nan: None})
                     is_list = ['is_in_taiwan','is_hybrid', 'is_endemic', 'is_fossil', 'is_terrestrial', 'is_freshwater', 'is_brackish', 'is_marine', 'not_official']
                     df[is_list] = df[is_list].replace({0: False, 1: True, '0': False, '1': True})
@@ -987,21 +1009,29 @@ class TaxonView(APIView):
                     df['formatted_synonyms'] = ''
                     df['misapplied'] = ''
                     df['formatted_misapplied'] = ''
-                    query = f"SELECT tu.taxon_id, tu.status, GROUP_CONCAT(DISTINCT(an.formatted_name) SEPARATOR ','), GROUP_CONCAT(DISTINCT(tn.name) SEPARATOR ',') \
+                    # query = f"SELECT tu.taxon_id, tu.status, GROUP_CONCAT(DISTINCT(an.formatted_name) SEPARATOR ','), GROUP_CONCAT(DISTINCT(tn.name) SEPARATOR ',') \
+                    #             FROM api_taxon_usages tu \
+                    #             JOIN api_names an ON tu.taxon_name_id = an.taxon_name_id \
+                    #             JOIN taxon_names tn ON tu.taxon_name_id = tn.id \
+                    #             WHERE tu.taxon_id IN %s and tu.status IN ('not-accepted', 'misapplied') \
+                    #             GROUP BY tu.status, tu.taxon_id;"
+                    query = f"SELECT DISTINCT tu.taxon_id, tu.status, an.formatted_name, tn.name \
                                 FROM api_taxon_usages tu \
                                 JOIN api_names an ON tu.taxon_name_id = an.taxon_name_id \
                                 JOIN taxon_names tn ON tu.taxon_name_id = tn.id \
-                                WHERE tu.taxon_id IN %s and tu.status IN ('not-accepted', 'misapplied') \
-                                GROUP BY tu.status, tu.taxon_id;"
+                                WHERE tu.taxon_id IN %s and tu.status IN ('not-accepted', 'misapplied');"
                     cursor.execute(query, (df.taxon_id.to_list(),))
                     other_names = cursor.fetchall()
+                    other_names = pd.DataFrame(other_names, columns=['taxon_id','status','formatted_name','name'])
+                    other_names = other_names.groupby(['taxon_id', 'status'], as_index = False).agg({'formatted_name': ','.join, 'name': ','.join})
+                    other_names = other_names.to_dict('records')
                     for o in other_names:
-                        if o[1] == 'not-accepted':
-                            df.loc[df['taxon_id'] == o[0], 'synonyms'] = o[3]
-                            df.loc[df['taxon_id'] == o[0], 'formatted_synonyms'] = o[2]
-                        elif o[1] == 'misapplied':
-                            df.loc[df['taxon_id'] == o[0], 'misapplied'] = o[3]
-                            df.loc[df['taxon_id'] == o[0], 'formatted_misapplied'] = o[2]
+                        if o.get('status') == 'not-accepted':
+                            df.loc[df['taxon_id'] == o.get('taxon_id'), 'synonyms'] = o.get('name')
+                            df.loc[df['taxon_id'] == o.get('taxon_id'), 'formatted_synonyms'] = o.get('formatted_name')
+                        elif o.get('status') == 'misapplied':
+                            df.loc[df['taxon_id'] == o.get('taxon_id'), 'misapplied'] = o.get('name')
+                            df.loc[df['taxon_id'] == o.get('taxon_id'), 'formatted_misapplied'] = o.get('formatted_name')
 
                     for i in df.index:
                         row = df.iloc[i]
@@ -1119,6 +1149,7 @@ class NameView(APIView):
             # update_citations()
 
             conn = pymysql.connect(**db_settings)
+            # 這邊的namecode concat應該不會超過上限 維持原本寫法
             base_query = "SELECT * FROM taxon_names tn "
             query = "SELECT tn.id, tn.rank_id, tn.name, an.name_author, \
                             tn.original_taxon_name_id, tn.note, tn.created_at, tn.updated_at, \
@@ -1246,6 +1277,7 @@ class NameView(APIView):
 
                 for h in df[['is_hybrid', 'name_id']].index:
                     if df.loc[h]['is_hybrid'] == 'true':
+                        # 這邊的namecode concat應該不會超過上限 維持原本寫法
                         query_hybrid_parent = f"SELECT GROUP_CONCAT( CONCAT(tn.name, ' ',tn.formatted_authors) SEPARATOR ' × ' ) FROM taxon_name_hybrid_parent AS tnhp \
                                                 JOIN taxon_names AS tn ON tn.id = tnhp.parent_taxon_name_id \
                                                 WHERE tnhp.taxon_name_id = {df.loc[h]['name_id']} \
