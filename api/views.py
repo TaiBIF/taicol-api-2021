@@ -246,6 +246,7 @@ class NamecodeView(APIView):
                         # Taiwan+誤用 misapplied
                         custom_dict = {'accepted': 0, 'not-accepted': 1, 'misapplied': 2}
                         taxon_tmp = taxon_tmp.sort_values(by=['status'], key=lambda x: x.map(custom_dict)).sort_values(by='is_in_taiwan',ascending=False)
+                        taxon_tmp['is_in_taiwan'] = taxon_tmp['is_in_taiwan'].replace({0: False, 1: True, '0': False, '1': True})
                         taxon_tmp = taxon_tmp.rename(columns={'status': 'usage_status'})
                         taxon_tmp = taxon_tmp[['taxon_id','usage_status','is_in_taiwan']]
                         df.loc[i,'taxon'] = taxon_tmp.to_json(orient='records')
@@ -298,6 +299,7 @@ class NamecodeView(APIView):
                         # Taiwan+誤用 misapplied
                         custom_dict = {'accepted': 0, 'not-accepted': 1, 'misapplied': 2}
                         taxon_tmp = taxon_tmp.sort_values(by=['status'], key=lambda x: x.map(custom_dict)).sort_values(by='is_in_taiwan',ascending=False)
+                        taxon_tmp['is_in_taiwan'] = taxon_tmp['is_in_taiwan'].replace({0: False, 1: True, '0': False, '1': True})
                         taxon_tmp = taxon_tmp.rename(columns={'status': 'usage_status'})
                         taxon_tmp = taxon_tmp[['taxon_id','usage_status','is_in_taiwan']]
                         df.loc[i,'taxon'] = taxon_tmp.to_json(orient='records')
@@ -1355,6 +1357,7 @@ class NameView(APIView):
                             # Taiwan+誤用 misapplied
                             custom_dict = {'accepted': 0, 'not-accepted': 1, 'misapplied': 2}
                             taxon_tmp = taxon_tmp.sort_values(by=['status'], key=lambda x: x.map(custom_dict)).sort_values(by='is_in_taiwan',ascending=False)
+                            taxon_tmp['is_in_taiwan'] = taxon_tmp['is_in_taiwan'].replace({0: False, 1: True, '0': False, '1': True})
                             taxon_tmp = taxon_tmp.rename(columns={'status': 'usage_status'})
                             taxon_tmp = taxon_tmp[['taxon_id','usage_status','is_in_taiwan']]
                             taxon_df.loc[i,'taxon'] = taxon_tmp.to_json(orient='records')
