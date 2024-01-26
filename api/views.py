@@ -223,7 +223,7 @@ class NamecodeView(APIView):
                     WITH cte
                         AS
                         (
-                            SELECT distinct anc.namecode, anc.taxon_name_id, atu.taxon_id, atu.status, at.is_deleted
+                            SELECT distinct anc.namecode, anc.taxon_name_id, atu.taxon_id, atu.status, at.is_deleted, at.is_in_taiwan
                             FROM api_namecode anc
                             LEFT JOIN api_taxon_usages atu ON atu.taxon_name_id = anc.taxon_name_id
                             LEFT JOIN api_taxon at ON at.taxon_id = atu.taxon_id
@@ -231,7 +231,7 @@ class NamecodeView(APIView):
                             LIMIT %s OFFSET %s
                         )
                     SELECT namecode, taxon_name_id, 
-                    JSON_ARRAYAGG(JSON_OBJECT('taxon_id', taxon_id, 'status', status, 'is_deleted', is_deleted))
+                    JSON_ARRAYAGG(JSON_OBJECT('taxon_id', taxon_id, 'status', status, 'is_deleted', is_deleted, 'is_in_taiwan', is_in_taiwan))
                     FROM cte GROUP BY namecode, taxon_name_id;
                     """
                     cursor.execute(query, (name_id,limit,offset))
@@ -239,16 +239,34 @@ class NamecodeView(APIView):
                     for i in df.index:
                         row = df.iloc[i]
                         taxon_tmp = json.loads(row.taxon)
-                        taxon_final = []
-                        for t in taxon_tmp:
-                            if t.get('is_deleted'):
-                                taxon_final.append({'taxon_id': t.get('taxon_id'), 'usage_status': 'deleted'})
-                            elif t.get('taxon_id'):
-                                taxon_final.append({'taxon_id': t.get('taxon_id'), 'usage_status': t.get('status')})
-                        df.loc[i,'taxon'] = json.dumps(taxon_final)
+                        taxon_tmp = pd.DataFrame(taxon_tmp)
+                        # 排序規則： 
+                        # Taiwan+有效 accepted
+                        # Taiwan+無效 not-accepted
+                        # Taiwan+誤用 misapplied
+                        custom_dict = {'accepted': 0, 'not-accepted': 1, 'misapplied': 2}
+                        taxon_tmp = taxon_tmp.sort_values(by=['status'], key=lambda x: x.map(custom_dict)).sort_values(by='is_in_taiwan',ascending=False)
+                        taxon_tmp = taxon_tmp.rename(columns={'status': 'usage_status'})
+                        taxon_tmp = taxon_tmp[['taxon_id','usage_status','is_in_taiwan']]
+                        df.loc[i,'taxon'] = taxon_tmp.to_json(orient='records')
                     if len(df):
                         df['taxon'] = df['taxon'].replace({np.nan:'[]'})
                         df['taxon'] = df['taxon'].apply(json.loads)
+
+
+                    # for i in df.index:
+                    #     row = df.iloc[i]
+                    #     taxon_tmp = json.loads(row.taxon)
+                    #     taxon_final = []
+                    #     for t in taxon_tmp:
+                    #         if t.get('is_deleted'):
+                    #             taxon_final.append({'taxon_id': t.get('taxon_id'), 'usage_status': 'deleted'})
+                    #         elif t.get('taxon_id'):
+                    #             taxon_final.append({'taxon_id': t.get('taxon_id'), 'usage_status': t.get('status')})
+                    #     df.loc[i,'taxon'] = json.dumps(taxon_final)
+                    # if len(df):
+                    #     df['taxon'] = df['taxon'].replace({np.nan:'[]'})
+                    #     df['taxon'] = df['taxon'].apply(json.loads)
 
             elif namecode := request.GET.getlist('namecode'):
                 conn = pymysql.connect(**db_settings)
@@ -257,7 +275,7 @@ class NamecodeView(APIView):
                     WITH cte
                         AS
                         (
-                            SELECT distinct anc.namecode, anc.taxon_name_id, atu.taxon_id, atu.status, at.is_deleted
+                            SELECT distinct anc.namecode, anc.taxon_name_id, atu.taxon_id, atu.status, at.is_deleted, at.is_in_taiwan
                             FROM api_namecode anc
                             LEFT JOIN api_taxon_usages atu ON atu.taxon_name_id = anc.taxon_name_id
                             LEFT JOIN api_taxon at ON at.taxon_id = atu.taxon_id
@@ -265,7 +283,7 @@ class NamecodeView(APIView):
                             LIMIT %s OFFSET %s
                         )
                     SELECT namecode, taxon_name_id, 
-                    JSON_ARRAYAGG(JSON_OBJECT('taxon_id', taxon_id, 'status', status, 'is_deleted', is_deleted))
+                    JSON_ARRAYAGG(JSON_OBJECT('taxon_id', taxon_id, 'status', status, 'is_deleted', is_deleted, 'is_in_taiwan', is_in_taiwan))
                     FROM cte GROUP BY namecode, taxon_name_id;
                     """
                     cursor.execute(query, (namecode,limit,offset))
@@ -273,16 +291,32 @@ class NamecodeView(APIView):
                     for i in df.index:
                         row = df.iloc[i]
                         taxon_tmp = json.loads(row.taxon)
-                        taxon_final = []
-                        for t in taxon_tmp:
-                            if t.get('is_deleted'):
-                                taxon_final.append({'taxon_id': t.get('taxon_id'), 'usage_status': 'deleted'})
-                            elif t.get('taxon_id'):
-                                taxon_final.append({'taxon_id': t.get('taxon_id'), 'usage_status': t.get('status')})
-                        df.loc[i,'taxon'] = json.dumps(taxon_final)
+                        taxon_tmp = pd.DataFrame(taxon_tmp)
+                        # 排序規則： 
+                        # Taiwan+有效 accepted
+                        # Taiwan+無效 not-accepted
+                        # Taiwan+誤用 misapplied
+                        custom_dict = {'accepted': 0, 'not-accepted': 1, 'misapplied': 2}
+                        taxon_tmp = taxon_tmp.sort_values(by=['status'], key=lambda x: x.map(custom_dict)).sort_values(by='is_in_taiwan',ascending=False)
+                        taxon_tmp = taxon_tmp.rename(columns={'status': 'usage_status'})
+                        taxon_tmp = taxon_tmp[['taxon_id','usage_status','is_in_taiwan']]
+                        df.loc[i,'taxon'] = taxon_tmp.to_json(orient='records')
                     if len(df):
                         df['taxon'] = df['taxon'].replace({np.nan:'[]'})
                         df['taxon'] = df['taxon'].apply(json.loads)
+                    # for i in df.index:
+                    #     row = df.iloc[i]
+                    #     taxon_tmp = json.loads(row.taxon)
+                    #     taxon_final = []
+                    #     for t in taxon_tmp:
+                    #         if t.get('is_deleted'):
+                    #             taxon_final.append({'taxon_id': t.get('taxon_id'), 'usage_status': 'deleted'})
+                    #         elif t.get('taxon_id'):
+                    #             taxon_final.append({'taxon_id': t.get('taxon_id'), 'usage_status': t.get('status')})
+                    #     df.loc[i,'taxon'] = json.dumps(taxon_final)
+                    # if len(df):
+                    #     df['taxon'] = df['taxon'].replace({np.nan:'[]'})
+                    #     df['taxon'] = df['taxon'].apply(json.loads)
 
             response = {"status": {"code": 200, "message": "Success"},
                         "info": {"total": len(df)}, "data": df.to_dict('records')}
