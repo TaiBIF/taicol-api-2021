@@ -319,6 +319,9 @@ class NamecodeView(APIView):
                     # if len(df):
                     #     df['taxon'] = df['taxon'].replace({np.nan:'[]'})
                     #     df['taxon'] = df['taxon'].apply(json.loads)
+                
+            else:
+                df = pd.DataFrame()
 
             response = {"status": {"code": 200, "message": "Success"},
                         "info": {"total": len(df)}, "data": df.to_dict('records')}
@@ -471,9 +474,13 @@ class ReferencesView(APIView):
                         if r[0] not in df.reference_id.to_list():
                             df = df.append({'reference_id': r[0], 'citation': r[1], 'status': None,
                                             'indications': None, 'is_in_taiwan': None, 'is_endemic': None, 'alien_type': None}, ignore_index=True)
-            df = df.replace({np.nan: None, '': None})
-            df['reference_id'] = df['reference_id'].replace({np.nan: 0}).astype('int64').replace({0: None})
-            df['usage_status'] = df['usage_status']
+                df = df.replace({np.nan: None, '': None})
+                df['reference_id'] = df['reference_id'].replace({np.nan: 0}).astype('int64').replace({0: None})
+                df['usage_status'] = df['usage_status']
+
+            else:
+                df = pd.DataFrame()
+        
             response = {"status": {"code": 200, "message": "Success"},
                         "info": {"total": len(df)}, "data": df.to_dict('records')}
         except Exception as er:
