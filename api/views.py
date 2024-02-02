@@ -84,6 +84,11 @@ def web_stat_stat(request):
             cursor.execute(query)
             results = cursor.fetchall()
             response['compare_table'] = results
+            # 全球物種數修改時間
+            query = """SELECT DATE_FORMAT(updated_at, '%Y-%m-%d') FROM api_web_table WHERE path = '全球物種數更新時間'"""  
+            cursor.execute(query)
+            results = cursor.fetchone()
+            response['global_updated'] = results[0]
 
         return HttpResponse(json.dumps(response))
 
