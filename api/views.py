@@ -88,7 +88,9 @@ def web_stat_stat(request):
             query = """SELECT DATE_FORMAT(updated_at, '%Y-%m-%d') FROM api_web_table WHERE path = '全球物種數更新時間'"""  
             cursor.execute(query)
             results = cursor.fetchone()
-            response['global_updated'] = results[0]
+            if len(results):
+                results = results[0]
+            response['global_updated'] = results
 
         return HttpResponse(json.dumps(response))
 
