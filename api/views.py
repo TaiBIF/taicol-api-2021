@@ -852,7 +852,10 @@ class TaxonView(APIView):
                         conditions += [f"t.{i} = 0"]
                     
                 if var := request.GET.get('alien_type', '').strip():
-                    conditions += ['''JSON_CONTAINS(t.alien_type, '{"alien_type":"''' + var + '''"}')  > 0''']
+                    conditions += [f't.main_alien_type = "{var}"']
+
+                # if var := request.GET.get('alien_type', '').strip():
+                #     conditions += ['''JSON_CONTAINS(t.alien_type, '{"alien_type":"''' + var + '''"}')  > 0''']
 
                 if updated_at:
                     if not validate(updated_at):
@@ -1003,7 +1006,7 @@ class TaxonView(APIView):
             #         """
             info_query = """
                     SELECT t.taxon_id, t.rank_id, t.accepted_taxon_name_id, acn.name_c, 
-                        t.is_hybrid, t.is_endemic, t.is_in_taiwan, t.alien_type, t.is_fossil, t.is_terrestrial, 
+                        t.is_hybrid, t.is_endemic, t.is_in_taiwan, t.main_alien_type, t.alien_note, t.is_fossil, t.is_terrestrial, 
                         t.is_freshwater, t.is_brackish, t.is_marine, ac.cites_listing, ac.iucn_category, ac.red_category, 
                         ac.protected_category, ac.sensitive_suggest, 
                         t.created_at, t.updated_at, tn.name, an.name_author, an.formatted_name, t.is_deleted, t.new_taxon_id, t.not_official
@@ -1028,7 +1031,7 @@ class TaxonView(APIView):
 
                 cursor.execute(query)
                 df = pd.DataFrame(cursor.fetchall(), columns=['taxon_id', 'rank', 'name_id', 'common_name_c', 
-                                                              'is_hybrid', 'is_endemic', 'is_in_taiwan', 'alien_type', 'is_fossil', 'is_terrestrial',
+                                                              'is_hybrid', 'is_endemic', 'is_in_taiwan', 'alien_type', 'alien_status_note', 'is_fossil', 'is_terrestrial',
                                                               'is_freshwater', 'is_brackish', 'is_marine', 'cites', 'iucn', 'redlist', 'protected', 'sensitive',
                                                               'created_at', 'updated_at', 'simple_name', 'name_author', 'formatted_name', 'is_deleted', 'new_taxon_id', 'not_official'])
                 # 0, 1 要轉成true, false (但可能會有null)
@@ -1085,12 +1088,28 @@ class TaxonView(APIView):
 
                     for i in df.index:
                         row = df.iloc[i]
-                        if row.alien_type:
-                            alt_list = []
-                            for at in json.loads(row.alien_type):
-                                if at.get('alien_type') not in alt_list:
-                                    alt_list.append(at.get('alien_type'))
-                            df.loc[i, 'alien_type'] = ','.join(alt_list)
+                        if row.alien_status_note:
+                            alien_rows = json.loads(row.alien_status_note)
+                            final_aliens = []
+                            already_types = []
+                            if len(alien_rows) > 1:
+                                for at in alien_rows:
+                                    already_types.append(at.get('alien_type'))
+                                    if at.get('status_note'):
+                                        final_aliens.append(f"{at.get('alien_type')}:{at.get('status_note')}")
+                                    else:
+                                        if at.get('alien_type') not in already_types:
+                                            final_aliens.append(at.get('alien_type'))
+                            final_aliens = list(dict.fromkeys(final_aliens))
+                        df.loc[i, 'alien_status_note'] = '|'.join(final_aliens)
+
+
+                        # if row.alien_type:
+                        #     alt_list = []
+                        #     for at in json.loads(row.alien_type):
+                        #         if at.get('alien_type') not in alt_list:
+                        #             alt_list.append(at.get('alien_type'))
+                        #     df.loc[i, 'alien_type'] = ','.join(alt_list)
 
                     df['cites'] = df['cites'].apply(lambda x: x.replace('1','I').replace('2','II').replace('3','III') if x else x)
                     df['redlist'] = df['redlist'].apply(lambda x: redlist_map_rev[x] if x else x)
@@ -1100,7 +1119,7 @@ class TaxonView(APIView):
 
                     # 排序
                     df = df[['taxon_id', 'taxon_status', 'name_id', 'simple_name', 'name_author', 'formatted_name', 'synonyms', 'formatted_synonyms', 'misapplied', 'formatted_misapplied',
-                            'rank', 'common_name_c', 'alternative_name_c', 'is_hybrid', 'is_endemic', 'is_in_taiwan', 'alien_type', 'is_fossil', 'is_terrestrial', 'is_freshwater', 'is_brackish',
+                            'rank', 'common_name_c', 'alternative_name_c', 'is_hybrid', 'is_endemic', 'is_in_taiwan', 'alien_type', 'alien_status_note', 'is_fossil', 'is_terrestrial', 'is_freshwater', 'is_brackish',
                              'is_marine','not_official', 'cites', 'iucn', 'redlist', 'protected', 'sensitive', 'created_at', 'updated_at', 'new_taxon_id']]
 
                     df = df.replace({np.nan: None, '': None})
