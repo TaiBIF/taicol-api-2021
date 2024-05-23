@@ -1086,22 +1086,64 @@ class TaxonView(APIView):
                             df.loc[df['taxon_id'] == o.get('taxon_id'), 'misapplied'] = o.get('name')
                             df.loc[df['taxon_id'] == o.get('taxon_id'), 'formatted_misapplied'] = o.get('formatted_name')
 
+                    query = "SELECT r.id, c.short_author, r.type \
+                                FROM `references` r  \
+                                LEFT JOIN api_citations c ON r.id = c.reference_id \
+                                JOIN api_taxon_usages atu ON r.id = atu.reference_id  \
+                                WHERE atu.taxon_id IN %s"  
+                    conn = pymysql.connect(**db_settings)
+                    with conn.cursor() as cursor:
+                        cursor.execute(query, (df.taxon_id.to_list(), ))
+                        refs = pd.DataFrame(cursor.fetchall(), columns=['reference_id', 'ref', 'type'])
+
+
                     for i in df.index:
                         row = df.iloc[i]
+                        final_aliens = []
                         if row.alien_status_note:
-                            alien_rows = json.loads(row.alien_status_note)
-                            final_aliens = []
-                            already_types = []
-                            if len(alien_rows) > 1:
-                                for at in alien_rows:
-                                    already_types.append(at.get('alien_type'))
-                                    if at.get('status_note'):
-                                        final_aliens.append(f"{at.get('alien_type')}:{at.get('status_note')}")
+                            # alien_rows = json.loads(row.alien_status_note)
+                            alien_rows = pd.DataFrame(json.loads(row.alien_status_note))
+                            if len(alien_rows):
+                                # ref_list = alien_rows.reference_id.to_list()
+                                print(alien_rows.keys())
+                                alien_rows = alien_rows.merge(refs,how='left')
+                                alien_rows = alien_rows.replace({np.nan: None})
+                                # 排除backbone & note 為null
+                                # 是backbone 沒有note
+                                # 不顯示
+                                alien_rows = alien_rows[~((alien_rows['type'].isin([4,6]))&(alien_rows.status_note.isnull()))]
+                                alien_rows = alien_rows.sort_values('is_latest', ascending=False)
+                                alien_rows = alien_rows[['alien_type','status_note','ref','type']].drop_duplicates()
+                                for at in alien_rows.to_dict('records'):
+                                    # 是backbone 有note
+                                    # 歸化: note
+                                    if at.get('type') in [4,6] and at.get('status_note'):
+                                        final_aliens.append(f"{at.get('alien_type')}: {at.get('status_note')}")
+                                    # 不是backbone 有note
+                                    # 原生: Chang-Yang et al., 2022 (note)
+                                    elif at.get('status_note'):
+                                        final_aliens.append(f"{at.get('alien_type')}: {at.get('ref')} ({at.get('status_note')})")
+                                    # 不是backbone 沒有notenote
+                                    # 原生: Chang-Yang et al., 2022
                                     else:
-                                        if at.get('alien_type') not in already_types:
-                                            final_aliens.append(at.get('alien_type'))
-                            final_aliens = list(dict.fromkeys(final_aliens))
+                                        final_aliens.append(f"{at.get('alien_type')}: {at.get('ref')}")
+
                         df.loc[i, 'alien_status_note'] = '|'.join(final_aliens)
+
+                        # if row.alien_status_note:
+                        #     alien_rows = json.loads(row.alien_status_note)
+                        #     final_aliens = []
+                        #     already_types = []
+                        #     if len(alien_rows) > 1:
+                        #         for at in alien_rows:
+                        #             already_types.append(at.get('alien_type'))
+                        #             if at.get('status_note'):
+                        #                 final_aliens.append(f"{at.get('alien_type')}:{at.get('status_note')}")
+                        #             else:
+                        #                 if at.get('alien_type') not in already_types:
+                        #                     final_aliens.append(at.get('alien_type'))
+                        #     final_aliens = list(dict.fromkeys(final_aliens))
+                        # df.loc[i, 'alien_status_note'] = '|'.join(final_aliens)
 
 
                         # if row.alien_type:
