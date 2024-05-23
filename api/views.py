@@ -1,13 +1,12 @@
-from os import error
-from re import L
-from django.shortcuts import render
+
+# from django.shortcuts import render
 from django.http import (
-    JsonResponse,
-    HttpResponseRedirect,
-    Http404,
+    # JsonResponse,
+    # HttpResponseRedirect,
+    # Http404,
     HttpResponse,
 )
-from django.core.paginator import Paginator
+# from django.core.paginator import Paginator
 import json
 import pymysql
 from conf.settings import env
@@ -19,9 +18,8 @@ import numpy as np
 from rest_framework.views import APIView
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
-from rest_framework.schemas import AutoSchema
 
-from api.utils import rank_map_c, rank_map, lin_map, lin_ranks, redlist_map, cites_map, protected_map, redlist_map_rev, get_variants, status_map
+from api.utils import *
 import requests
 
 db_settings = {
@@ -34,6 +32,9 @@ db_settings = {
 
 match_url = env('NOMENMATCH_URL')
 
+
+
+# TODO 這邊可以改成 同一張表 query 一次就好嗎
 def web_stat_stat(request):
         conn = pymysql.connect(**db_settings)
         response = {}
@@ -261,20 +262,6 @@ class NamecodeView(APIView):
                         df['taxon'] = df['taxon'].replace({np.nan:'[]'})
                         df['taxon'] = df['taxon'].apply(json.loads)
 
-
-                    # for i in df.index:
-                    #     row = df.iloc[i]
-                    #     taxon_tmp = json.loads(row.taxon)
-                    #     taxon_final = []
-                    #     for t in taxon_tmp:
-                    #         if t.get('is_deleted'):
-                    #             taxon_final.append({'taxon_id': t.get('taxon_id'), 'usage_status': 'deleted'})
-                    #         elif t.get('taxon_id'):
-                    #             taxon_final.append({'taxon_id': t.get('taxon_id'), 'usage_status': t.get('status')})
-                    #     df.loc[i,'taxon'] = json.dumps(taxon_final)
-                    # if len(df):
-                    #     df['taxon'] = df['taxon'].replace({np.nan:'[]'})
-                    #     df['taxon'] = df['taxon'].apply(json.loads)
 
             elif namecode := request.GET.getlist('namecode'):
                 conn = pymysql.connect(**db_settings)
@@ -522,17 +509,12 @@ class HigherTaxaView(APIView):
             response = {"status": {"code": 400, "message": "Bad Request: Unsupported parameters"}}
             return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
         try:
+
+
             data = []  # 如果沒有輸入taxon_id, 不回傳資料
             if taxon_id := request.GET.get('taxon_id'):
                 # 先確認是不是沒被刪除的taxon
                 conn = pymysql.connect(**db_settings)
-                # query = f"""SELECT is_deleted, new_taxon_id FROM api_taxon WHERE taxon_id = %s"""
-                # with conn.cursor() as cursor:
-                #     cursor.execute(query, (taxon_id,))
-                #     res = cursor.fetchone()
-                #     if res:
-                #         if res[0]:
-                #             taxon_id = res[1]
 
                 # if taxon_id:
                 # 分成兩階段 先抓回path，再去抓name
@@ -548,38 +530,45 @@ class HigherTaxaView(APIView):
                     if info[1]:
                         path = info[1].split('>')              
                         query = f"""SELECT t.taxon_id, t.accepted_taxon_name_id, tn.name, 
-                                an.name_author, an.formatted_name, t.rank_id, acn.name_c 
+                                an.name_author, an.formatted_name, t.rank_id, acn.name_c, r.order
                                 FROM api_taxon t 
                                 LEFT JOIN api_common_name acn ON acn.taxon_id = t.taxon_id AND acn.is_primary = 1
                                 JOIN taxon_names tn ON t.accepted_taxon_name_id = tn.id 
                                 JOIN api_names an ON t.accepted_taxon_name_id = an.taxon_name_id 
+                                JOIN `ranks` r ON r.id = t.rank_id
                                 WHERE t.taxon_id IN %s 
-                                ORDER BY t.rank_id DESC"""
+                                ORDER BY r.order DESC"""
                         with conn.cursor() as cursor:
                             cursor.execute(query, (path,))
                             higher = cursor.fetchall()
                             higher = pd.DataFrame(higher, columns=['taxon_id','name_id','simple_name','name_author',
-                                                    'formatted_name','rank_id','common_name_c'])
+                                                    'formatted_name','rank_id','common_name_c','rank_order'])
                             
+                        # TODO rank_order
                         # 補上階層未定 
                         # 先找出應該要有哪些林奈階層
-                        current_ranks = higher.rank_id.to_list() + [info[0]]
+                        current_rank_orders = higher.rank_order.to_list()
                         for x in lin_map.keys():
-                            if x not in current_ranks and x < max(current_ranks) and x > min(current_ranks):
-                                higher = pd.concat([higher, pd.Series({'rank_id': x, 'common_name_c': '地位未定', 'taxon_id': None, 
-                                                                    'name_id': None, 'name_author': None }).to_frame().T], ignore_index=True)
+                            now_order = lin_map_w_order[x]['rank_order']
+                            if now_order not in current_rank_orders and now_order < max(current_rank_orders) and now_order > min(current_rank_orders):
+                                higher = pd.concat([higher, pd.Series({'rank_id': x, 'common_name_c': '地位未定', 'taxon_id': None, 'rank_order': lin_map_w_order[x]['rank_order']}).to_frame().T], ignore_index=True)
+
+
                         # 從最大的rank開始補
-                        higher = higher.sort_values('rank_id', ignore_index=True, ascending=False)
+                        higher = higher.sort_values('rank_order', ignore_index=True, ascending=False)
+                        higher = higher.replace({np.nan: None})
                         for hi in higher[higher.taxon_id.isnull()].index:
+                            # 病毒域可能會找不到東西補 
                             found_hi = hi + 1
-                            while not higher.loc[found_hi].taxon_id:
-                                found_hi += 1
-                            higher.loc[hi, 'formatted_name'] = f'{higher.loc[found_hi].formatted_name} {lin_map[higher.loc[hi].rank_id]} incertae sedis'
-                            higher.loc[hi, 'simple_name'] = f'{higher.loc[found_hi].simple_name} {lin_map[higher.loc[hi].rank_id]} incertae sedis'
+                            if found_hi < len(higher):
+                                while not higher.loc[found_hi].taxon_id:
+                                    found_hi += 1
+                            higher.loc[hi, 'simple_name'] = f'{higher.loc[found_hi].simple_name} {lin_map[higher.loc[hi]["rank_id"]]} incertae sedis'
+                            higher.loc[hi, 'common_name_c'] = '地位未定'
+                        higher = higher.replace({np.nan: None, '': None})
                         higher['rank'] = higher['rank_id'].apply(lambda x: rank_map[x])
                         higher = higher.replace({np.nan: None, '': None})
                         higher['name_id'] = higher['name_id'].replace({np.nan: 0}).astype('int64').replace({0: None})
-                        # higher = higher.sort_values('rank_id', ignore_index=True, ascending=True)
                         data = higher[['taxon_id','name_id','simple_name','name_author','formatted_name','rank','common_name_c']].to_dict(orient='records')
             response = {"status": {"code": 200, "message": "Success"},
                         "data": data}
@@ -985,31 +974,13 @@ class TaxonView(APIView):
                     count_query = f"SELECT count(*) FROM api_taxon"
 
             # 最後整理回傳資料使用
-            # info_query = """
-            #         SELECT t.taxon_id, t.rank_id, t.accepted_taxon_name_id, acn.name_c, GROUP_CONCAT(distinct acnn.name_c SEPARATOR ',') as alternative_name_c, 
-            #             t.is_hybrid, t.is_endemic, t.is_in_taiwan, t.alien_type, t.is_fossil, t.is_terrestrial, 
-            #             t.is_freshwater, t.is_brackish, t.is_marine, ac.cites_listing, ac.iucn_category, ac.red_category, 
-            #             ac.protected_category, ac.sensitive_suggest, 
-            #             t.created_at, t.updated_at, tn.name, an.name_author, an.formatted_name, t.is_deleted, t.new_taxon_id, t.not_official
-            #         FROM base_query t 
-            #             JOIN taxon_names tn ON t.accepted_taxon_name_id = tn.id 
-            #             LEFT JOIN api_taxon_tree att ON t.taxon_id = att.taxon_id 
-            #             LEFT JOIN api_common_name acn ON t.taxon_id = acn.taxon_id and acn.is_primary = 1
-            #             LEFT JOIN api_common_name acnn ON t.taxon_id = acnn.taxon_id and acnn.is_primary = 0
-            #             LEFT JOIN api_names an ON t.accepted_taxon_name_id = an.taxon_name_id 
-            #             LEFT JOIN api_conservation ac ON t.taxon_id = ac.taxon_id 
-            #             GROUP BY t.taxon_id, t.rank_id, t.accepted_taxon_name_id, acn.name_c, 
-            #                 t.is_hybrid, t.is_endemic, t.is_in_taiwan, t.alien_type, t.is_fossil, t.is_terrestrial, 
-            #                 t.is_freshwater, t.is_brackish, t.is_marine, ac.cites_listing, ac.iucn_category, ac.red_category, 
-            #                 ac.protected_category, ac.sensitive_suggest, 
-            #                 t.created_at, t.updated_at, tn.name, an.name_author, an.formatted_name, t.is_deleted, t.new_taxon_id, t.not_official
-            #         """
+
             info_query = """
                     SELECT t.taxon_id, t.rank_id, t.accepted_taxon_name_id, acn.name_c, 
                         t.is_hybrid, t.is_endemic, t.is_in_taiwan, t.main_alien_type, t.alien_note, t.is_fossil, t.is_terrestrial, 
                         t.is_freshwater, t.is_brackish, t.is_marine, ac.cites_listing, ac.iucn_category, ac.red_category, 
                         ac.protected_category, ac.sensitive_suggest, 
-                        t.created_at, t.updated_at, tn.name, an.name_author, an.formatted_name, t.is_deleted, t.new_taxon_id, t.not_official
+                        t.created_at, t.updated_at, tn.name, an.name_author, an.formatted_name, t.is_deleted, t.new_taxon_id, t.not_official, att.parent_taxon_id
                     FROM base_query t 
                         JOIN taxon_names tn ON t.accepted_taxon_name_id = tn.id 
                         LEFT JOIN api_taxon_tree att ON t.taxon_id = att.taxon_id 
@@ -1017,13 +988,6 @@ class TaxonView(APIView):
                         LEFT JOIN api_names an ON t.accepted_taxon_name_id = an.taxon_name_id 
                         LEFT JOIN api_conservation ac ON t.taxon_id = ac.taxon_id 
                     """
-                    # JOIN api_taxon_usages atu ON t.taxon_id = atu.taxon_id
-                    # JOIN taxon_names tnn ON atu.taxon_name_id = tnn.id
-                    # GROUP BY t.taxon_id, t.rank_id, t.accepted_taxon_name_id, acn.name_c, 
-                    # t.is_hybrid, t.is_endemic, t.is_in_taiwan, t.alien_type, t.is_fossil, t.is_terrestrial, 
-                    # t.is_freshwater, t.is_brackish, t.is_marine, ac.cites_listing, ac.iucn_category, ac.red_category, 
-                    # ac.protected_category, ac.sensitive_suggest, 
-                    # t.created_at, t.updated_at, tn.name, an.name_author, an.formatted_name, t.is_deleted, t.new_taxon_id
             with conn.cursor() as cursor:
                 cursor.execute(count_query)
                 len_total = cursor.fetchall()[0][0]
@@ -1033,7 +997,7 @@ class TaxonView(APIView):
                 df = pd.DataFrame(cursor.fetchall(), columns=['taxon_id', 'rank', 'name_id', 'common_name_c', 
                                                               'is_hybrid', 'is_endemic', 'is_in_taiwan', 'alien_type', 'alien_status_note', 'is_fossil', 'is_terrestrial',
                                                               'is_freshwater', 'is_brackish', 'is_marine', 'cites', 'iucn', 'redlist', 'protected', 'sensitive',
-                                                              'created_at', 'updated_at', 'simple_name', 'name_author', 'formatted_name', 'is_deleted', 'new_taxon_id', 'not_official'])
+                                                              'created_at', 'updated_at', 'simple_name', 'name_author', 'formatted_name', 'is_deleted', 'new_taxon_id', 'not_official','parent_taxon_id'])
                 # 0, 1 要轉成true, false (但可能會有null)
                 if len(df):
                     # 在這步取得alternative_common_name
@@ -1062,12 +1026,7 @@ class TaxonView(APIView):
                     df['formatted_synonyms'] = ''
                     df['misapplied'] = ''
                     df['formatted_misapplied'] = ''
-                    # query = f"SELECT tu.taxon_id, tu.status, GROUP_CONCAT(DISTINCT(an.formatted_name) SEPARATOR ','), GROUP_CONCAT(DISTINCT(tn.name) SEPARATOR ',') \
-                    #             FROM api_taxon_usages tu \
-                    #             JOIN api_names an ON tu.taxon_name_id = an.taxon_name_id \
-                    #             JOIN taxon_names tn ON tu.taxon_name_id = tn.id \
-                    #             WHERE tu.taxon_id IN %s and tu.status IN ('not-accepted', 'misapplied') \
-                    #             GROUP BY tu.status, tu.taxon_id;"
+
                     query = f"SELECT DISTINCT tu.taxon_id, tu.status, an.formatted_name, tn.name \
                                 FROM api_taxon_usages tu \
                                 JOIN api_names an ON tu.taxon_name_id = an.taxon_name_id \
@@ -1130,29 +1089,6 @@ class TaxonView(APIView):
 
                         df.loc[i, 'alien_status_note'] = '|'.join(final_aliens)
 
-                        # if row.alien_status_note:
-                        #     alien_rows = json.loads(row.alien_status_note)
-                        #     final_aliens = []
-                        #     already_types = []
-                        #     if len(alien_rows) > 1:
-                        #         for at in alien_rows:
-                        #             already_types.append(at.get('alien_type'))
-                        #             if at.get('status_note'):
-                        #                 final_aliens.append(f"{at.get('alien_type')}:{at.get('status_note')}")
-                        #             else:
-                        #                 if at.get('alien_type') not in already_types:
-                        #                     final_aliens.append(at.get('alien_type'))
-                        #     final_aliens = list(dict.fromkeys(final_aliens))
-                        # df.loc[i, 'alien_status_note'] = '|'.join(final_aliens)
-
-
-                        # if row.alien_type:
-                        #     alt_list = []
-                        #     for at in json.loads(row.alien_type):
-                        #         if at.get('alien_type') not in alt_list:
-                        #             alt_list.append(at.get('alien_type'))
-                        #     df.loc[i, 'alien_type'] = ','.join(alt_list)
-
                     df['cites'] = df['cites'].apply(lambda x: x.replace('1','I').replace('2','II').replace('3','III') if x else x)
                     df['redlist'] = df['redlist'].apply(lambda x: redlist_map_rev[x] if x else x)
 
@@ -1162,7 +1098,7 @@ class TaxonView(APIView):
                     # 排序
                     df = df[['taxon_id', 'taxon_status', 'name_id', 'simple_name', 'name_author', 'formatted_name', 'synonyms', 'formatted_synonyms', 'misapplied', 'formatted_misapplied',
                             'rank', 'common_name_c', 'alternative_name_c', 'is_hybrid', 'is_endemic', 'is_in_taiwan', 'alien_type', 'alien_status_note', 'is_fossil', 'is_terrestrial', 'is_freshwater', 'is_brackish',
-                             'is_marine','not_official', 'cites', 'iucn', 'redlist', 'protected', 'sensitive', 'created_at', 'updated_at', 'new_taxon_id']]
+                             'is_marine','not_official', 'cites', 'iucn', 'redlist', 'protected', 'sensitive', 'created_at', 'updated_at', 'new_taxon_id', 'parent_taxon_id']]
 
                     df = df.replace({np.nan: None, '': None})
                     df['name_id'] = df['name_id'].replace({np.nan: 0}).astype('int64').replace({0: None})
