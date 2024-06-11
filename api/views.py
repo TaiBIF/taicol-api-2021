@@ -9,7 +9,7 @@ from django.http import (
 # from django.core.paginator import Paginator
 import json
 import pymysql
-from conf.settings import env
+from conf.settings import env, SOLR_PREFIX
 import pandas as pd
 import datetime
 from json import JSONEncoder
@@ -513,63 +513,55 @@ class HigherTaxaView(APIView):
 
             data = []  # 如果沒有輸入taxon_id, 不回傳資料
             if taxon_id := request.GET.get('taxon_id'):
-                # 先確認是不是沒被刪除的taxon
-                conn = pymysql.connect(**db_settings)
-
-                # if taxon_id:
                 # 分成兩階段 先抓回path，再去抓name
-                query = f"""SELECT at.rank_id, att.path FROM api_taxon_tree att
-                            JOIN api_taxon at ON at.taxon_id = att.taxon_id
-                            WHERE att.taxon_id = %s"""
-                info = ''
-                with conn.cursor() as cursor:
-                    cursor.execute(query, (taxon_id,))
-                    info = cursor.fetchone()
 
-                if info:
-                    if info[1]:
-                        path = info[1].split('>')              
-                        query = f"""SELECT t.taxon_id, t.accepted_taxon_name_id, tn.name, 
-                                an.name_author, an.formatted_name, t.rank_id, acn.name_c, r.order
-                                FROM api_taxon t 
-                                LEFT JOIN api_common_name acn ON acn.taxon_id = t.taxon_id AND acn.is_primary = 1
-                                JOIN taxon_names tn ON t.accepted_taxon_name_id = tn.id 
-                                JOIN api_names an ON t.accepted_taxon_name_id = an.taxon_name_id 
-                                JOIN `ranks` r ON r.id = t.rank_id
-                                WHERE t.taxon_id IN %s 
-                                ORDER BY r.order DESC"""
-                        with conn.cursor() as cursor:
-                            cursor.execute(query, (path,))
-                            higher = cursor.fetchall()
-                            higher = pd.DataFrame(higher, columns=['taxon_id','name_id','simple_name','name_author',
-                                                    'formatted_name','rank_id','common_name_c','rank_order'])
-                            
-                        # TODO rank_order
-                        # 補上階層未定 
-                        # 先找出應該要有哪些林奈階層
-                        current_rank_orders = higher.rank_order.to_list()
-                        for x in lin_map.keys():
-                            now_order = lin_map_w_order[x]['rank_order']
-                            if now_order not in current_rank_orders and now_order < max(current_rank_orders) and now_order > min(current_rank_orders):
-                                higher = pd.concat([higher, pd.Series({'rank_id': x, 'common_name_c': '地位未定', 'taxon_id': None, 'rank_order': lin_map_w_order[x]['rank_order']}).to_frame().T], ignore_index=True)
+                taxon_resp = requests.get(f'{SOLR_PREFIX}taxa/select?fq=taxon_name_id:*&fq=status:accepted&q=taxon_id:{taxon_id}&fl=path,taxon_rank_id')
+                if taxon_resp.status_code == 200:
+                    if taxon_resp.json()['response']['numFound']:
+                        info = taxon_resp.json()['response']['docs'][0]
+                        if path := info.get('path'):
+                            path = path.split('>')
+                            path_str = ' OR '.join(path)
 
+                            # NOTE 這邊可能會需要query已經刪除的taxon
+                            path_resp = requests.get(f'{SOLR_PREFIX}taxa/select?fq=taxon_name_id:*&fq=status:accepted&q=taxon_id:({path_str})&fl=taxon_id,accepted_taxon_name_id,simple_name,name_author,formatted_accepted_name,taxon_rank_id,common_name_c&rows=1000')
+                            if path_resp.status_code == 200:
+                                higher = pd.DataFrame(path_resp.json()['response']['docs'])
+                                musthave_cols = ['taxon_id','accepted_taxon_name_id','simple_name','name_author','formatted_accepted_name','taxon_rank_id','common_name_c']
+                                for m in musthave_cols:
+                                    if m not in higher.keys():
+                                        higher[m] = None
+                                higher = higher.rename(columns={'accepted_taxon_name_id': 'name_id', 'formatted_accepted_name': 'formatted_name',
+                                                                'taxon_rank_id': 'rank_id'})
+                                higher['rank_id'] = higher['rank_id'].apply(int)
+                                higher['rank_order'] = higher['rank_id'].apply(lambda x: rank_order_map[x])
+                                
+                                # rank_order
+                                # 補上階層未定 
+                                # 先找出應該要有哪些林奈階層
+                                current_rank_orders = higher.rank_order.to_list()
+                                for x in lin_map.keys():
+                                    now_order = lin_map_w_order[x]['rank_order']
+                                    if now_order not in current_rank_orders and now_order < max(current_rank_orders) and now_order > min(current_rank_orders):
+                                        higher = pd.concat([higher, pd.Series({'rank_id': x, 'common_name_c': '地位未定', 'taxon_id': None, 'rank_order': lin_map_w_order[x]['rank_order']}).to_frame().T], ignore_index=True)
 
-                        # 從最大的rank開始補
-                        higher = higher.sort_values('rank_order', ignore_index=True, ascending=False)
-                        higher = higher.replace({np.nan: None})
-                        for hi in higher[higher.taxon_id.isnull()].index:
-                            # 病毒域可能會找不到東西補 
-                            found_hi = hi + 1
-                            if found_hi < len(higher):
-                                while not higher.loc[found_hi].taxon_id:
-                                    found_hi += 1
-                            higher.loc[hi, 'simple_name'] = f'{higher.loc[found_hi].simple_name} {lin_map[higher.loc[hi]["rank_id"]]} incertae sedis'
-                            higher.loc[hi, 'common_name_c'] = '地位未定'
-                        higher = higher.replace({np.nan: None, '': None})
-                        higher['rank'] = higher['rank_id'].apply(lambda x: rank_map[x])
-                        higher = higher.replace({np.nan: None, '': None})
-                        higher['name_id'] = higher['name_id'].replace({np.nan: 0}).astype('int64').replace({0: None})
-                        data = higher[['taxon_id','name_id','simple_name','name_author','formatted_name','rank','common_name_c']].to_dict(orient='records')
+                                # 從最大的rank開始補
+                                higher = higher.sort_values('rank_order', ignore_index=True, ascending=False)
+                                higher = higher.replace({np.nan: None})
+                                for hi in higher[higher.taxon_id.isnull()].index:
+                                    # 病毒域可能會找不到東西補 
+                                    found_hi = hi + 1
+                                    if found_hi < len(higher):
+                                        while not higher.loc[found_hi].taxon_id:
+                                            found_hi += 1
+                                    higher.loc[hi, 'simple_name'] = f'{higher.loc[found_hi].simple_name} {lin_map[higher.loc[hi]["rank_id"]]} incertae sedis'
+                                    higher.loc[hi, 'common_name_c'] = '地位未定'
+                                higher = higher.replace({np.nan: None, '': None})
+                                higher['rank'] = higher['rank_id'].apply(lambda x: rank_map[x])
+                                higher = higher.replace({np.nan: None, '': None})
+                                higher['name_id'] = higher['name_id'].replace({np.nan: 0}).astype('int64').replace({0: None})
+                                data = higher[['taxon_id','name_id','simple_name','name_author','formatted_name','rank','common_name_c']].to_dict(orient='records')
+
             response = {"status": {"code": 200, "message": "Success"},
                         "data": data}
         except Exception as er:
