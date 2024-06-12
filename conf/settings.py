@@ -162,3 +162,6 @@ STATIC_ROOT = os.path.join(PROJECT_DIR, 'static')  # /conf/static
 SWAGGER_SETTINGS = {
    'USE_SESSION_AUTH': False
 }
+
+
+SOLR_PREFIX = env('SOLR_PREFIX')
