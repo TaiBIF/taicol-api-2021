@@ -11,17 +11,19 @@ services:
       - .:/code
       - ../taicol-volumes/static:/code/conf/static
       # - ../taicol-volumes/data:/code/data
-    expose:
-      - 8002
-    tty: true
-    stdin_open: true
+    # expose:
+    #   - 8002
+    ports:
+      - 8002:8002
+    # tty: true
+    # stdin_open: true
     env_file:
       - .env
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.whoami.rule=Host(`api-staging.taicol.tw`)"
-      - "traefik.http.routers.whoami.entrypoints=websecure"
-      - "traefik.http.routers.whoami.tls.certresolver=myresolver"
+    # labels:
+    #   - "traefik.enable=true"
+    #   - "traefik.http.routers.whoami.rule=Host(`api-staging.taicol.tw`)"
+    #   - "traefik.http.routers.whoami.entrypoints=websecure"
+    #   - "traefik.http.routers.whoami.tls.certresolver=myresolver"
   # nginx:
   #   image: nginx
   #   restart: always
@@ -38,45 +40,45 @@ services:
   #     - web:web
   #   command: "/bin/sh -c 'while :; do sleep 6h & wait $${!}; nginx -s reload; done &
   #     nginx -g \"daemon off;\"'"
-  mysql:
-    build: ./scripts/mysql
-    container_name: tc-api-mysql-container
-    ports:
-      - "3307:3306"
-    image: tc-api-mysql-image
-    restart: always
-    environment:
-      MYSQL_ALLOW_EMPTY_PASSWORD: "true"
-    # env_file:
-      # - ./app/.env
-    volumes:
-      - ../taicol-volumes/mysql:/var/lib/mysql:rw
-      - ../taicol-volumes/bucket:/bucket
-    command:
-      [
-        "mysqld",
-        "--character-set-server=utf8mb4",
-        "--collation-server=utf8mb4_unicode_ci",
-      ]
-  traefik:
-    image: "traefik:v2.10"
-    container_name: "traefik"
-    command:
-      #- "--log.level=DEBUG"
-      - "--api.insecure=true"
-      - "--providers.docker=true"
-      - "--providers.docker.exposedbydefault=false"
-      - "--entrypoints.websecure.address=:443"
-      - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
-      #- "--certificatesresolvers.myresolver.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory"
-      - "--certificatesresolvers.myresolver.acme.email=catalogueoflife.taiwan@gmail.com"
-      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
-    ports:
-      - "443:443"
-      # - "8080:8080"
-    volumes:
-      - "./letsencrypt:/letsencrypt"
-      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+  # mysql:
+  #   build: ./scripts/mysql
+  #   container_name: tc-api-mysql-container
+  #   ports:
+  #     - "3307:3306"
+  #   image: tc-api-mysql-image
+  #   restart: always
+  #   environment:
+  #     MYSQL_ALLOW_EMPTY_PASSWORD: "true"
+  #   # env_file:
+  #     # - ./app/.env
+  #   volumes:
+  #     - ../taicol-volumes/mysql:/var/lib/mysql:rw
+  #     - ../taicol-volumes/bucket:/bucket
+  #   command:
+  #     [
+  #       "mysqld",
+  #       "--character-set-server=utf8mb4",
+  #       "--collation-server=utf8mb4_unicode_ci",
+  #     ]
+  # traefik:
+  #   image: "traefik:v2.10"
+  #   container_name: "traefik"
+  #   command:
+  #     #- "--log.level=DEBUG"
+  #     - "--api.insecure=true"
+  #     - "--providers.docker=true"
+  #     - "--providers.docker.exposedbydefault=false"
+  #     - "--entrypoints.websecure.address=:443"
+  #     - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
+  #     #- "--certificatesresolvers.myresolver.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory"
+  #     - "--certificatesresolvers.myresolver.acme.email=catalogueoflife.taiwan@gmail.com"
+  #     - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+  #   ports:
+  #     - "443:443"
+  #     # - "8080:8080"
+  #   volumes:
+  #     - "./letsencrypt:/letsencrypt"
+  #     - "/var/run/docker.sock:/var/run/docker.sock:ro"
   # whoami:
   #   image: "traefik/whoami"
   #   container_name: "simple-service"
