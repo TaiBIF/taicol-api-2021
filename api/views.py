@@ -36,64 +36,64 @@ match_url = env('NOMENMATCH_URL')
 
 # TODO 這邊可以改成 同一張表 query 一次就好嗎
 def web_stat_stat(request):
-        conn = pymysql.connect(**db_settings)
-        response = {}
-        with conn.cursor() as cursor:
-            # 各界物種數
-            query = """SELECT category, count FROM api_web_stat WHERE title = 'kingdom_count'"""  
-            cursor.execute(query)
-            results = cursor.fetchall()
-            response['kingdom_count'] = results
-            # 各階層數量
-            query = """SELECT category, count FROM api_web_stat WHERE title = 'rank_count'"""  
-            cursor.execute(query)
-            results = cursor.fetchall()
-            response['rank_count'] = results
-            # 各類生物種數&特有比例
-            query = """SELECT category, count, total_count FROM api_web_stat WHERE title = 'endemic_count'"""  
-            cursor.execute(query)
-            results = cursor.fetchall()
-            response['endemic_count'] = results
-            # 物種來源比例
-            query = """SELECT category, count FROM api_web_stat WHERE title = 'source_count'"""  
-            cursor.execute(query)
-            results = cursor.fetchall()
-            response['source_count'] = results
-            # 全球物種數比較
-            query = """SELECT category, count, total_count FROM api_web_stat WHERE title = 'kingdom_count'"""  
-            cursor.execute(query)
-            results = cursor.fetchall()
-            response['kingdom_compare'] = results
-            query = """SELECT category, count, total_count FROM api_web_stat WHERE title = 'animalia_compare'"""  
-            cursor.execute(query)
-            results = cursor.fetchall()
-            response['animalia_compare'] = results
-            query = """SELECT category, count, total_count FROM api_web_stat WHERE title = 'arthropoda_compare'"""  
-            cursor.execute(query)
-            results = cursor.fetchall()
-            response['arthropoda_compare'] = results
-            query = """SELECT category, count, total_count FROM api_web_stat WHERE title = 'chordata_compare'"""  
-            cursor.execute(query)
-            results = cursor.fetchall()
-            response['chordata_compare'] = results
-            query = """SELECT category, count, total_count FROM api_web_stat WHERE title = 'plantae_compare'"""  
-            cursor.execute(query)
-            results = cursor.fetchall()
-            response['plantae_compare'] = results
-            # 全球物種數比較總表
-            query = """SELECT path, total_count, count, provider FROM api_web_table"""  
-            cursor.execute(query)
-            results = cursor.fetchall()
-            response['compare_table'] = results
-            # 全球物種數修改時間
-            query = """SELECT DATE_FORMAT(updated_at, '%Y-%m-%d') FROM api_web_table WHERE path = '全球物種數更新時間'"""  
-            cursor.execute(query)
-            results = cursor.fetchone()
-            if len(results):
-                results = results[0]
-            response['global_updated'] = results
+    conn = pymysql.connect(**db_settings)
+    response = {}
+    with conn.cursor() as cursor:
+        # 各界物種數
+        query = """SELECT category, count FROM api_web_stat WHERE title = 'kingdom_count'"""  
+        cursor.execute(query)
+        results = cursor.fetchall()
+        response['kingdom_count'] = results
+        # 各階層數量
+        query = """SELECT category, count FROM api_web_stat WHERE title = 'rank_count'"""  
+        cursor.execute(query)
+        results = cursor.fetchall()
+        response['rank_count'] = results
+        # 各類生物種數&特有比例
+        query = """SELECT category, count, total_count FROM api_web_stat WHERE title = 'endemic_count'"""  
+        cursor.execute(query)
+        results = cursor.fetchall()
+        response['endemic_count'] = results
+        # 物種來源比例
+        query = """SELECT category, count FROM api_web_stat WHERE title = 'source_count'"""  
+        cursor.execute(query)
+        results = cursor.fetchall()
+        response['source_count'] = results
+        # 全球物種數比較
+        query = """SELECT category, count, total_count FROM api_web_stat WHERE title = 'kingdom_count'"""  
+        cursor.execute(query)
+        results = cursor.fetchall()
+        response['kingdom_compare'] = results
+        query = """SELECT category, count, total_count FROM api_web_stat WHERE title = 'animalia_compare'"""  
+        cursor.execute(query)
+        results = cursor.fetchall()
+        response['animalia_compare'] = results
+        query = """SELECT category, count, total_count FROM api_web_stat WHERE title = 'arthropoda_compare'"""  
+        cursor.execute(query)
+        results = cursor.fetchall()
+        response['arthropoda_compare'] = results
+        query = """SELECT category, count, total_count FROM api_web_stat WHERE title = 'chordata_compare'"""  
+        cursor.execute(query)
+        results = cursor.fetchall()
+        response['chordata_compare'] = results
+        query = """SELECT category, count, total_count FROM api_web_stat WHERE title = 'plantae_compare'"""  
+        cursor.execute(query)
+        results = cursor.fetchall()
+        response['plantae_compare'] = results
+        # 全球物種數比較總表
+        query = """SELECT path, total_count, count, provider FROM api_web_table"""  
+        cursor.execute(query)
+        results = cursor.fetchall()
+        response['compare_table'] = results
+        # 全球物種數修改時間
+        query = """SELECT DATE_FORMAT(updated_at, '%Y-%m-%d') FROM api_web_table WHERE path = '全球物種數更新時間'"""  
+        cursor.execute(query)
+        results = cursor.fetchone()
+        if len(results):
+            results = results[0]
+        response['global_updated'] = results
 
-        return HttpResponse(json.dumps(response))
+    return HttpResponse(json.dumps(response))
 
 
 def web_index_stat(request):
@@ -104,13 +104,6 @@ def web_index_stat(request):
             results = cursor.fetchall()
             return HttpResponse(json.dumps(results))
 
-
-def validate(date_text):
-    try:
-        datetime.datetime.strptime(date_text, '%Y-%m-%d')
-        return True
-    except ValueError:
-        return False
 
 
 class DateTimeEncoder(JSONEncoder):
@@ -733,21 +726,17 @@ class TaxonView(APIView):
             # only consider first parameter
             # 輸入taxon_id
 
-
-
             solr_query_list = get_conditioned_solr_search(req=request.GET)
             # print(solr_query_list)
-
 
             limit = 300 if limit > 300 else limit  # 最大值 300
 
             query = { "query": "*:*",
-              "offset": offset,
-              "limit": limit,
-              "filter": solr_query_list,
-              "sort": 'taxon_id asc',
-            }
-
+                    "offset": offset,
+                    "limit": limit,
+                    "filter": solr_query_list,
+                    "sort": 'taxon_id asc',
+                    }
 
             query_req = json.dumps(query)
 
@@ -757,18 +746,15 @@ class TaxonView(APIView):
 
             count = resp['response']['numFound']
 
-            if count:
-
+            # 這邊應該要改成docs才對 因為有可能給了錯誤的offset 造成沒有回傳docs
+            if resp['response']['docs']:
 
                 df = pd.DataFrame(resp['response']['docs'])
-
 
                 # df = df
                 # [['taxon_id', 'taxon_status', 'name_id', 'simple_name', 'name_author', 'formatted_name', 'synonyms', 'formatted_synonyms', 'misapplied', 'formatted_misapplied',
                 #     'rank', 'common_name_c', 'alternative_name_c', 'is_hybrid', 'is_endemic', 'is_in_taiwan', 'alien_type', 'alien_status_note', 'is_fossil', 'is_terrestrial', 'is_freshwater', 'is_brackish',
                 #          'is_marine','not_official', 'cites', 'iucn', 'redlist', 'protected', 'sensitive', 'created_at', 'updated_at', 'new_taxon_id', 'parent_taxon_id']]
-
-
 
                 # 從這邊開始merge從solr過來的資料
                 df = df.rename(columns={

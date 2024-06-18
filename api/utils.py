@@ -15,9 +15,10 @@ db_settings = {
     "db": env('DB_DBNAME'),
 }
 
+
 def validate(date_text):
     try:
-        datetime.datetime.strptime(date_text, '%Y-%m-%d')
+        datetime.strptime(date_text, '%Y-%m-%d')
         return True
     except ValueError:
         return False
@@ -266,17 +267,18 @@ def get_conditioned_solr_search(req):
 
         keyword = get_variants(keyword)
         name_query_list.append('search_name:/{}/'.format(keyword))
-        # has_name_search = True
 
-
-    if common_name_keyword := req.get('common_name_c','').strip():
+    if common_name_keyword := req.get('common_name','').strip():
 
         common_name_keyword = get_variants(common_name_keyword)
         name_query_list.append('search_name:/{}/'.format(common_name_keyword))
         name_query_list.append('-taxon_name_id:*')
-        # has_name_search = True
 
     if name_query_list:
+
+        # NOTE 這邊未來可能要考慮加上limit offset在這邊 因為有俗名會超過一百個taxon_id
+        # 要確認搭配其他參數有沒有問題
+
         query = { "query": "*:*",
             "offset": 0,
             "limit": 0,
@@ -299,7 +301,6 @@ def get_conditioned_solr_search(req):
         
         if taxon_ids:
             query_list.append('taxon_id:({})'.format(' OR '.join(taxon_ids)))
-
 
 
     rank = req.get('rank')
@@ -335,12 +336,12 @@ def get_conditioned_solr_search(req):
     # 日期
 
     if updated_at := req.get('updated_at', '').strip().strip('"').strip("'"):
-        if not validate(updated_at):
+        if validate(updated_at):
             updated_at += 'T00:00:00Z'
             query_list.append('updated_at:[{} TO *]'.format(updated_at))
 
     if created_at := req.get('created_at', '').strip().strip('"').strip("'"):
-        if not validate(created_at):
+        if validate(created_at):
             created_at += 'T00:00:00Z'
             query_list.append('created_at:[{} TO *]'.format(created_at))
 
@@ -392,11 +393,11 @@ def get_conditioned_solr_search(req):
                 # conditions.append(f"({' OR '.join(t_str)})")
                 query_list.append(f"({' OR '.join(t_str)})")
 
-    # 如果沒有 scientific_name & common_name 的查詢項的話 要加上status = accepted 避免重複
+    # 要加上status = accepted 避免重複
 
-    if not name_query_list:
-        query_list.append('taxon_name_id:*')
-        query_list.append('status:accepted')
+    # if not name_query_list:
+    query_list.append('taxon_name_id:*')
+    query_list.append('status:accepted')
 
 
     return query_list
