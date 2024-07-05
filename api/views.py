@@ -351,7 +351,7 @@ class NameMatchView(APIView):
             return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
         try:
             name_id_list = []
-            conn = pymysql.connect(**db_settings)            
+            conn = pymysql.connect(**db_settings)
             df = pd.DataFrame(columns=['taxon_id', 'usage_status'])
             if name_id := request.GET.get('name_id'):
                 name_id_list.append(int(name_id))
@@ -381,14 +381,24 @@ class NameMatchView(APIView):
                             name_ = cursor.fetchall()
                             name_id_list = [n[0] for n in name_]
             if name_id_list:
+                # print(name_id_list)
                 with conn.cursor() as cursor:
-                    query = f"SELECT distinct t.name, t.id, t1.name, t1.id, atu.taxon_id, atu.status, at.is_deleted \
-                        FROM api_taxon_usages atu \
-                        JOIN api_taxon at ON atu.taxon_id = at.taxon_id  \
-                        JOIN taxon_names t ON atu.taxon_name_id = t.id  \
-                        JOIN taxon_names t1 ON at.accepted_taxon_name_id = t1.id  \
-                        WHERE atu.taxon_name_id IN %s AND t.deleted_at IS NULL AND t1.deleted_at IS NULL"  
-                    cursor.execute(query, (name_id_list,))
+                    # query = f"SELECT distinct t.name, t.id, t1.name, t1.id, atu.taxon_id, atu.status, at.is_deleted \
+                    #     FROM api_taxon_usages atu \
+                    #     JOIN api_taxon at ON atu.taxon_id = at.taxon_id  \
+                    #     JOIN taxon_names t ON atu.taxon_name_id = t.id  \
+                    #     JOIN taxon_names t1 ON at.accepted_taxon_name_id = t1.id  \
+                    #     WHERE atu.taxon_name_id IN %s AND t.deleted_at IS NULL AND t1.deleted_at IS NULL"  
+                    query = """
+                            WITH base_query AS (SELECT `name`, id FROM taxon_names WHERE id IN %s AND deleted_at IS NULL)
+                            SELECT distinct t.name, t.id, t1.name, t1.id, atu.taxon_id, atu.status, at.is_deleted 
+                            FROM api_taxon_usages atu 
+                            JOIN api_taxon at ON atu.taxon_id = at.taxon_id  
+                            JOIN base_query t ON atu.taxon_name_id = t.id  
+                            JOIN base_query t1 ON at.accepted_taxon_name_id = t1.id  
+                            WHERE atu.taxon_name_id IN %s 
+                            """
+                    cursor.execute(query, (name_id_list,name_id_list))
                     df = pd.DataFrame(cursor.fetchall(), columns=['matched_name', 'matched_name_id', 'accepted_name', 'accepted_name_id', 'taxon_id', 'usage_status', 'is_deleted'])
                     df = df.replace({np.nan: None, '': None})
                     if len(df):
