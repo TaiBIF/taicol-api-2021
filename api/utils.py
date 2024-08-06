@@ -54,7 +54,7 @@ with conn.cursor() as cursor:
     rank_map_c = dict(zip([r[0] for r in ranks], [eval(r[1])['zh-tw'] for r in ranks]))
     rank_map_c_reverse = dict(zip([eval(r[1])['zh-tw'] for r in ranks],[r[0] for r in ranks]))
     rank_order_map = dict(zip([r[0] for r in ranks], [r[2] for r in ranks]))
-
+conn.close()
 
 # 林奈階層
 
@@ -377,7 +377,7 @@ def get_conditioned_solr_search(req):
     # 取得指定分類群以下的所有階層物種資料，可輸入學名或中文名
 
     if taxon_group := req.get('taxon_group'):
-
+        conn = pymysql.connect(**db_settings)
 
         query_1 = f"""SELECT t.taxon_id FROM taxon_names tn 
                     JOIN api_taxon t ON tn.id = t.accepted_taxon_name_id 
@@ -389,9 +389,11 @@ def get_conditioned_solr_search(req):
             if len(t_id):
                 # 可能不只一筆
                 t_str = [ 'path:/.*{}.*/'.format(t[0]) for t in t_id]
-                # t_str = [ f"att.path like '%>{t[0]}%'" for t in t_id]
-                # conditions.append(f"({' OR '.join(t_str)})")
                 query_list.append(f"({' OR '.join(t_str)})")
+        
+        conn.close()
+
+    # print(query_list)
 
     # 要加上status = accepted 避免重複
 

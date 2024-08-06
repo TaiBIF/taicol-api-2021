@@ -92,6 +92,7 @@ def web_stat_stat(request):
         if len(results):
             results = results[0]
         response['global_updated'] = results
+    conn.close()
 
     return HttpResponse(json.dumps(response))
 
@@ -102,6 +103,7 @@ def web_index_stat(request):
             query = """SELECT category, count FROM api_web_stat WHERE title = 'index'"""  
             cursor.execute(query)
             results = cursor.fetchall()
+            conn.close()
             return HttpResponse(json.dumps(results))
 
 
@@ -162,7 +164,7 @@ class TaxonVersionView(APIView):
                             data.append({'taxon_id': taxon_id, 'name_id': int(json.loads(n[0]).get('new_taxon_name_id')), 'reference_id': n[2], 'updated_at': n[1]})
                         else:
                             data.append({'taxon_id': taxon_id, 'name_id': int(json.loads(n[0]).get('new_taxon_name_id')), 'reference_id': None, 'updated_at': n[1]})
-
+                conn.close()
             response = {"status": {"code": 200, "message": "Success"},
                         "info": {"total": len(data)}, "data": data}
         except Exception as er:
@@ -254,7 +256,7 @@ class NamecodeView(APIView):
                     if len(df):
                         df['taxon'] = df['taxon'].replace({np.nan:'[]'})
                         df['taxon'] = df['taxon'].apply(json.loads)
-
+                conn.close()
 
             elif namecode := request.GET.getlist('namecode'):
                 conn = pymysql.connect(**db_settings)
@@ -293,6 +295,7 @@ class NamecodeView(APIView):
                     if len(df):
                         df['taxon'] = df['taxon'].replace({np.nan:'[]'})
                         df['taxon'] = df['taxon'].apply(json.loads)
+                conn.close()
                     # for i in df.index:
                     #     row = df.iloc[i]
                     #     taxon_tmp = json.loads(row.taxon)
@@ -406,6 +409,7 @@ class NameMatchView(APIView):
                         df.loc[df.is_deleted==1, 'usage_status'] = 'deleted'
                         df['usage_status'] = df['usage_status']
                         df = df.drop(columns=['is_deleted'])
+            conn.close()
             response = {"status": {"code": 200, "message": "Success"},
                         "info": {"total": len(df)}, "data": df.to_dict('records')}
             # return HttpResponse(json.dumps(response, ensure_ascii=False, cls=DateTimeEncoder), content_type="application/json,charset=utf-8")
@@ -471,6 +475,7 @@ class ReferencesView(APIView):
                         if r[0] not in df.reference_id.to_list():
                             df = df.append({'reference_id': r[0], 'citation': r[1], 'status': None,
                                             'indications': None, 'is_in_taiwan': None, 'is_endemic': None, 'alien_type': None}, ignore_index=True)
+                conn.close()
                 df = df.replace({np.nan: None, '': None})
                 df['reference_id'] = df['reference_id'].replace({np.nan: 0}).astype('int64').replace({0: None})
                 df['usage_status'] = df['usage_status']
@@ -512,8 +517,6 @@ class HigherTaxaView(APIView):
             response = {"status": {"code": 400, "message": "Bad Request: Unsupported parameters"}}
             return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
         try:
-
-
             data = []  # 如果沒有輸入taxon_id, 不回傳資料
             if taxon_id := request.GET.get('taxon_id'):
                 # 分成兩階段 先抓回path，再去抓name
@@ -525,7 +528,6 @@ class HigherTaxaView(APIView):
                         if path := info.get('path'):
                             path = path.split('>')
                             path_str = ' OR '.join(path)
-
                             # NOTE 這邊可能會需要query已經刪除的taxon
                             path_resp = requests.get(f'{SOLR_PREFIX}taxa/select?fq=taxon_name_id:*&fq=status:accepted&q=taxon_id:({path_str})&fl=taxon_id,accepted_taxon_name_id,simple_name,name_author,formatted_accepted_name,taxon_rank_id,common_name_c&rows=1000')
                             if path_resp.status_code == 200:
@@ -737,7 +739,6 @@ class TaxonView(APIView):
             # 輸入taxon_id
 
             solr_query_list = get_conditioned_solr_search(req=request.GET)
-            # print(solr_query_list)
 
             limit = 300 if limit > 300 else limit  # 最大值 300
 
@@ -1059,7 +1060,6 @@ class NameView(APIView):
                 df = df.replace({np.nan: None})
 
                 if len(df):
-
 
                     # 加上taxon
                     with conn.cursor() as cursor:     
