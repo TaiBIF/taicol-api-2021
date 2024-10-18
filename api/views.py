@@ -467,7 +467,7 @@ class ReferencesView(APIView):
                 query = f"SELECT c.reference_id, CONCAT_WS(' ' , c.author, c.content) \
                         FROM taxon_names tn \
                         JOIN api_citations c ON tn.reference_id = c.reference_id    \
-                        WHERE tn.id = %s AND tn.reference_id IS NOT NULL AND tn.deleted_at IS NULL"
+                        WHERE tn.id = %s AND tn.reference_id IS NOT NULL AND tn.deleted_at IS NULL AND tn.is_publish = 1"
                 with conn.cursor() as cursor:
                     cursor.execute(query, (name_id, ))
                     results = cursor.fetchall()
@@ -936,7 +936,7 @@ class NameView(APIView):
                             GROUP BY tn.id ORDER BY tn.id "
             count_query = "SELECT COUNT(*) FROM taxon_names tn"
 
-            conditions = []
+            conditions = ['tn.is_publish = 1']
             # conditions = ['tn.deleted_at IS NULL']
             if updated_at:
                 if not validate(updated_at):
@@ -968,7 +968,7 @@ class NameView(APIView):
                     count_query += " AND " + c
             elif taxon_group:
                 # 先由 學名 / 中文名 找出符合的name_id
-                query_1 = f"SELECT id FROM taxon_names WHERE name = '{taxon_group}'"
+                query_1 = f"SELECT id FROM taxon_names WHERE name = '{taxon_group}' AND is_publish = 1"
                 # conn = pymysql.connect(**db_settings)
                 results = ()
                 with conn.cursor() as cursor:
