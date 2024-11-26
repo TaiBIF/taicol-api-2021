@@ -359,16 +359,20 @@ class NameMatchView(APIView):
     )
     def get(self, request, *args, **krgs):
 
-        if request.GET.keys() and not set(list(request.GET.keys())) <= set(['name_id', 'name', 'best']):
+        if request.GET.keys() and not set(list(request.GET.keys())) <= set(['name_id', 'name', 'best', 'only_taiwan', 'bio_group', 'rank', 'kingdom']):
             response = {"status": {"code": 400, "message": "Bad Request: Unsupported parameters"}}
             return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
         try:
             name_id_list = []
+
             conn = pymysql.connect(**db_settings)
             df = pd.DataFrame(columns=['taxon_id', 'usage_status'])
+
             if name_id := request.GET.get('name_id'):
                 name_id_list.append(int(name_id))
+
             elif name := request.GET.get('name'): # 如果是查name, 接NomenMatchAPI
+
                 best = request.GET.get('best')
                 if best and not best in ['yes', 'no']:
                     response = {"status": {"code": 400, "message": "Bad Request: Unsupported parameter value"}}
@@ -377,52 +381,76 @@ class NameMatchView(APIView):
                     best = 'yes'
                 else:
                     best = request.GET.get('best')
-                url = f"{match_url}?names={name}&best={best}&format=json&source=taicol"
-                result = requests.get(url)
-                if result.status_code == 200:
-                    result = result.json()
-                    # 取得name_id
-                    name_list = []
-                    for d in result['data']:
-                        for ds in d:
-                            for r in ds['results']:
-                                name_list.append(r.get('simple_name'))
-                    if name_list:
-                        with conn.cursor() as cursor:
-                            query = "SELECT id FROM taxon_names where name IN %s;"
-                            cursor.execute(query, (name_list,))
-                            name_ = cursor.fetchall()
-                            name_id_list = [n[0] for n in name_]
-            if name_id_list:
-                # print(name_id_list)
+
+                query_dict =  {
+                    'names': name,
+                    'best': best,
+                    'format': 'json',
+                    'source': 'taicol'
+                }
+
+                # only_taiwan={yes/no} 是否僅比對臺灣物種。
+
+                only_taiwan = request.GET.get('only_taiwan', 'yes')
+
+                if only_taiwan == 'yes':
+                    query_dict['is_in_taiwan'] = True
+
+                # rank={string} 比對階層
+                
+                if ranks := request.GET.getlist('rank'):
+                    query_dict['taxon_rank'] = ",".join(ranks)
+
+                # kingdom 比對生物界
+
+                if kingdoms := request.GET.getlist('kingdom'):
+                    query_dict['kingdom'] = ",".join([f'"{k}"' for k in kingdoms])
+
+                # bio_group 比對常見類群
+                if request.GET.get('bio_group') != 'all':
+                    query_dict['taxon_group'] = request.GET.get('bio_group')
+
+                resp = requests.post(match_url, data=query_dict)
+
+                if resp.status_code == 200:
+                    resp = resp.json()
+                    data = resp['data']
+                    tmp_df = pd.DataFrame()
+                    namecode_list = []
+                    for ddd in data:
+                        for dd in ddd:
+                            for d in dd['results']:
+                                tmp_dict = {
+                                    "matched_name": d['simple_name'],
+                                    "taxon_id": d['namecode'],
+                                    "usage_status": d['name_status']
+                                }
+                                namecode_list.append(d['namecode'])
+                                tmp_df = pd.concat([tmp_df, pd.DataFrame([tmp_dict])], ignore_index=True)
+
+            if namecode_list:
                 with conn.cursor() as cursor:
                     query = f"SELECT distinct t.name, t.id, t1.name, t1.id, atu.taxon_id, atu.status, at.is_deleted \
                         FROM api_taxon_usages atu \
                         JOIN api_taxon at ON atu.taxon_id = at.taxon_id  \
                         JOIN taxon_names t ON atu.taxon_name_id = t.id  \
                         JOIN taxon_names t1 ON at.accepted_taxon_name_id = t1.id  \
-                        WHERE atu.taxon_name_id IN %s AND t.deleted_at IS NULL AND t1.deleted_at IS NULL"  
-                    # query = """
-                    #         WITH base_query AS (SELECT `name`, id FROM taxon_names WHERE id IN %s AND deleted_at IS NULL)
-                    #         SELECT distinct t.name, t.id, t1.name, t1.id, atu.taxon_id, atu.status, at.is_deleted 
-                    #         FROM api_taxon_usages atu 
-                    #         JOIN api_taxon at ON atu.taxon_id = at.taxon_id  
-                    #         JOIN base_query t ON atu.taxon_name_id = t.id  
-                    #         LEFT JOIN base_query t1 ON at.accepted_taxon_name_id = t1.id  
-                    #         WHERE atu.taxon_name_id IN %s 
-                    #         """
-                    cursor.execute(query, (name_id_list,))
+                        WHERE atu.taxon_id IN %s AND t.deleted_at IS NULL AND t1.deleted_at IS NULL"  
+                    cursor.execute(query, (namecode_list,))
                     df = pd.DataFrame(cursor.fetchall(), columns=['matched_name', 'matched_name_id', 'accepted_name', 'accepted_name_id', 'taxon_id', 'usage_status', 'is_deleted'])
                     df = df.replace({np.nan: None, '': None})
+                    df = tmp_df.merge(df)
+                    df = df.reset_index(drop=True)
                     if len(df):
                         df = df.drop_duplicates()
                         df.loc[df.is_deleted==1, 'usage_status'] = 'deleted'
                         df['usage_status'] = df['usage_status']
                         df = df.drop(columns=['is_deleted'])
+
             conn.close()
             response = {"status": {"code": 200, "message": "Success"},
                         "info": {"total": len(df)}, "data": df.to_dict('records')}
-            # return HttpResponse(json.dumps(response, ensure_ascii=False, cls=DateTimeEncoder), content_type="application/json,charset=utf-8")
+
         except Exception as er:
             print(er)
             response = {"status": {"code": 500, "message": "Unexpected Error"}}
