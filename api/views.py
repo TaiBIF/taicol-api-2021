@@ -286,8 +286,8 @@ class NamecodeView(APIView):
                         custom_dict = {'accepted': 0, 'not-accepted': 1, 'misapplied': 2}
                         taxon_tmp = taxon_tmp.sort_values(by=['status'], key=lambda x: x.map(custom_dict)).sort_values(by='is_in_taiwan',ascending=False)
                         taxon_tmp['is_in_taiwan'] = taxon_tmp['is_in_taiwan'].replace({0: False, 1: True, '0': False, '1': True})
-                        taxon_tmp = taxon_tmp.rename(columns={'status': 'usage_status'})
-                        taxon_tmp = taxon_tmp[['taxon_id','usage_status','is_in_taiwan']]
+                        taxon_tmp = taxon_tmp.rename(columns={'status': 'taicol_name_status'})
+                        taxon_tmp = taxon_tmp[['taxon_id','taicol_name_status','is_in_taiwan']]
                         df.loc[i,'taxon'] = taxon_tmp.to_json(orient='records')
                     if len(df):
                         df['taxon'] = df['taxon'].replace({np.nan:'[]'})
@@ -325,26 +325,13 @@ class NamecodeView(APIView):
                         custom_dict = {'accepted': 0, 'not-accepted': 1, 'misapplied': 2}
                         taxon_tmp = taxon_tmp.sort_values(by=['status'], key=lambda x: x.map(custom_dict)).sort_values(by='is_in_taiwan',ascending=False)
                         taxon_tmp['is_in_taiwan'] = taxon_tmp['is_in_taiwan'].replace({0: False, 1: True, '0': False, '1': True})
-                        taxon_tmp = taxon_tmp.rename(columns={'status': 'usage_status'})
-                        taxon_tmp = taxon_tmp[['taxon_id','usage_status','is_in_taiwan']]
+                        taxon_tmp = taxon_tmp.rename(columns={'status': 'taicol_name_status'})
+                        taxon_tmp = taxon_tmp[['taxon_id','taicol_name_status','is_in_taiwan']]
                         df.loc[i,'taxon'] = taxon_tmp.to_json(orient='records')
                     if len(df):
                         df['taxon'] = df['taxon'].replace({np.nan:'[]'})
                         df['taxon'] = df['taxon'].apply(json.loads)
                 conn.close()
-                    # for i in df.index:
-                    #     row = df.iloc[i]
-                    #     taxon_tmp = json.loads(row.taxon)
-                    #     taxon_final = []
-                    #     for t in taxon_tmp:
-                    #         if t.get('is_deleted'):
-                    #             taxon_final.append({'taxon_id': t.get('taxon_id'), 'usage_status': 'deleted'})
-                    #         elif t.get('taxon_id'):
-                    #             taxon_final.append({'taxon_id': t.get('taxon_id'), 'usage_status': t.get('status')})
-                    #     df.loc[i,'taxon'] = json.dumps(taxon_final)
-                    # if len(df):
-                    #     df['taxon'] = df['taxon'].replace({np.nan:'[]'})
-                    #     df['taxon'] = df['taxon'].apply(json.loads)
                 
             else:
                 df = pd.DataFrame()
@@ -539,15 +526,6 @@ class NameMatchView(APIView):
                         df['accepted_name_usage'] = df['accepted_name_usage'].apply(json.loads)
                         data = df.to_dict('records')
 
-                        # for dd in :
-                            
-
-
-
-                                
-
-
-
             conn.close()
             response = {"status": {"code": 200, "message": "Success"},
                         "info": {"total": len(df)}, "data": data}
@@ -635,7 +613,6 @@ class ReferencesView(APIView):
                 conn.close()
                 df = df.replace({np.nan: None, '': None})
                 df['reference_id'] = df['reference_id'].replace({np.nan: 0}).astype('int64').replace({0: None})
-                df['usage_status'] = df['usage_status']
         
             response = {"status": {"code": 200, "message": "Success"},
                         "info": {"total": len(df)}, "data": df.to_dict('records')}
@@ -930,14 +907,14 @@ class TaxonView(APIView):
                     })
                 
 
-                # 一定要有的欄位
-                musthave_cols = ['search_name','usage_status','taxon_id','formatted_name','rank','common_name_c',
-                    'is_hybrid','is_in_taiwan','is_endemic','alien_type','is_fossil','is_terrestrial',
-                    'is_freshwater','is_brackish','is_marine','not_official','cites','iucn','redlist','protected']
+                # # 一定要有的欄位
+                # musthave_cols = ['search_name','usage_status','taxon_id','formatted_name','rank','common_name_c',
+                #     'is_hybrid','is_in_taiwan','is_endemic','alien_type','is_fossil','is_terrestrial',
+                #     'is_freshwater','is_brackish','is_marine','not_official','cites','iucn','redlist','protected']
 
-                for m in musthave_cols:
-                    if m not in df.keys():
-                        df[m] = None
+                # for m in musthave_cols:
+                #     if m not in df.keys():
+                #         df[m] = None
 
                 df['created_at'] = df.created_at.apply(lambda x: x[0].split('T')[0])
                 df['updated_at'] = df.updated_at.apply(lambda x: x[0].split('T')[0])
@@ -1245,7 +1222,7 @@ class NameView(APIView):
                             taxon_tmp = taxon_tmp.sort_values(by=['status'], key=lambda x: x.map(custom_dict)).sort_values(by='is_in_taiwan',ascending=False)
                             taxon_tmp['is_in_taiwan'] = taxon_tmp['is_in_taiwan'].replace({0: False, 1: True, '0': False, '1': True})
                             taxon_tmp = taxon_tmp.rename(columns={'status': 'usage_status'})
-                            taxon_tmp = taxon_tmp[['taxon_id','usage_status','is_in_taiwan']]
+                            taxon_tmp = taxon_tmp[['taxon_id','taicol_name_status','is_in_taiwan']]
                             taxon_df.loc[i,'taxon'] = taxon_tmp.to_json(orient='records')
 
                     if len(taxon_df):
