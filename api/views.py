@@ -32,7 +32,33 @@ db_settings = {
 
 match_url = env('NOMENMATCH_URL')
 
+reference_type_map = {
+    1: 'Journal Article',
+    2: 'Book Chapter',
+    3: 'Book',
+    4: 'Backbone',
+    5: 'Checklist',
+}
 
+# type= 1 or 2 or 3 地位是相同的 
+custom_reference_type_order = {
+    1: 1,
+    2: 1,
+    3: 1,
+    4: 3,
+    5: 2,
+}
+
+
+bio_group_map = {
+    "Insects": "昆蟲",
+    "Fishes": "魚類",
+    "Reptiles": "爬蟲類",
+    "Birds": "鳥類",
+    "Mammals": "哺乳類",
+    "Vascular Plants": "維管束植物",
+    "Viruses": "病毒",
+}
 
 # 改成 同一張表 query 一次
 def web_stat_stat(request):
@@ -364,9 +390,10 @@ class NameMatchView(APIView):
             return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
         try:
             name_id_list = []
+            data = []
 
             conn = pymysql.connect(**db_settings)
-            df = pd.DataFrame(columns=['taxon_id', 'usage_status'])
+            df = pd.DataFrame(columns=['taxon_id', 'taicol_name_status'])
 
             if name_id := request.GET.get('name_id'):
                 name_id_list.append(int(name_id))
@@ -407,8 +434,15 @@ class NameMatchView(APIView):
                     query_dict['kingdom'] = ",".join([f'"{k}"' for k in kingdoms])
 
                 # bio_group 比對常見類群
-                if request.GET.get('bio_group') != 'all':
-                    query_dict['taxon_group'] = request.GET.get('bio_group')
+
+                bio_group = request.GET.get('bio_group')
+                if bio_group != 'all':
+                    # 中英比對
+                    if bio_group in bio_group_map.keys():
+                        bio_group = bio_group_map[bio_group]
+                    query_dict['taxon_group'] = bio_group
+
+                # print(query_dict)
 
                 resp = requests.post(match_url, data=query_dict)
 
@@ -423,33 +457,100 @@ class NameMatchView(APIView):
                                 tmp_dict = {
                                     "matched_name": d['simple_name'],
                                     "taxon_id": d['namecode'],
-                                    "usage_status": d['name_status']
+                                    "taicol_name_status": d['name_status']
                                 }
                                 namecode_list.append(d['namecode'])
                                 tmp_df = pd.concat([tmp_df, pd.DataFrame([tmp_dict])], ignore_index=True)
 
             if namecode_list:
+                # TODO 先把所有的usage抓回來，再根據文獻優先序排序
+                # 先抓原本的資料 後面再抓accepted_usage
                 with conn.cursor() as cursor:
                     query = f"SELECT distinct t.name, t.id, t1.name, t1.id, atu.taxon_id, atu.status, at.is_deleted \
                         FROM api_taxon_usages atu \
                         JOIN api_taxon at ON atu.taxon_id = at.taxon_id  \
                         JOIN taxon_names t ON atu.taxon_name_id = t.id  \
-                        JOIN taxon_names t1 ON at.accepted_taxon_name_id = t1.id  \
-                        WHERE atu.taxon_id IN %s AND t.deleted_at IS NULL AND t1.deleted_at IS NULL"  
+                        JOIN taxon_names t1 ON at.accepted_taxon_name_id = t1.id \
+                        WHERE atu.taxon_id IN %s AND t.deleted_at IS NULL AND t1.deleted_at IS NULL"
                     cursor.execute(query, (namecode_list,))
-                    df = pd.DataFrame(cursor.fetchall(), columns=['matched_name', 'matched_name_id', 'accepted_name', 'accepted_name_id', 'taxon_id', 'usage_status', 'is_deleted'])
+                    df = pd.DataFrame(cursor.fetchall(), columns=['matched_name', 'matched_name_id', 'accepted_name', 'accepted_name_id', 'taxon_id', 'taicol_name_status', 'is_deleted'])
                     df = df.replace({np.nan: None, '': None})
                     df = tmp_df.merge(df)
                     df = df.reset_index(drop=True)
                     if len(df):
                         df = df.drop_duplicates()
-                        df.loc[df.is_deleted==1, 'usage_status'] = 'deleted'
-                        df['usage_status'] = df['usage_status']
+                        df.loc[df.is_deleted==1, 'taicol_name_status'] = 'deleted'
+                        df['taicol_name_status'] = df['taicol_name_status']
                         df = df.drop(columns=['is_deleted'])
+                        # 取得 accepted_name_usage
+                        query = """SELECT ru.taxon_name_id, ru.id, ru.reference_id, r.type, r.publish_year,
+                                 CONCAT_WS(' ' ,c.author, c.content), JSON_EXTRACT(ru.properties, '$.is_in_taiwan') 
+                                 FROM reference_usages ru 
+                                 JOIN `references` r ON ru.reference_id = r.id
+                                 LEFT JOIN api_citations c ON ru.reference_id = c.reference_id
+                                 WHERE ru.taxon_name_id IN %s AND ru.status = 'accepted' AND ru.deleted_at IS NULL
+                                """
+                        with conn.cursor() as cursor:
+                            cursor.execute(query, (list(df.accepted_name_id.unique()),))
+                            accepted_name_usage = pd.DataFrame(cursor.fetchall(), columns=['accepted_name_id', 'usage_id', 'reference_id', 'reference_type', 'publish_year', 'citation', 'is_in_taiwan'])
+                            if len(accepted_name_usage):
+                                accepted_name_usage['reference_order'] = accepted_name_usage['reference_type'].apply(lambda x: custom_reference_type_order[x])
+                                # 先處理排序 先排year再排type
+                                accepted_name_usage = accepted_name_usage.sort_values('publish_year', ascending=False).sort_values('reference_order')
+                                # 先處理 reference_type = 4 的
+                                accepted_name_usage['publish_year'] = accepted_name_usage['publish_year'].apply(lambda x: int(x) if x else None)
+                                accepted_name_usage.loc[accepted_name_usage.reference_type==4, 'reference_id'] = None
+                                accepted_name_usage.loc[accepted_name_usage.reference_type==4, 'publish_year'] = None
+                                accepted_name_usage.loc[accepted_name_usage.reference_type==4, 'citation'] = 'TaiCOL Backbone'
+                                accepted_name_usage['reference_type'] = accepted_name_usage['reference_type'].apply(lambda x: reference_type_map[x] if x else None)
+                                accepted_name_usage['publish_year'] = accepted_name_usage['publish_year'].fillna(0).astype(int).replace({0: None})
+                                accepted_name_usage['reference_id'] = accepted_name_usage['reference_id'].fillna(0).astype(int).replace({0: None})
+                                for name_id in df.accepted_name_id.unique():
+                                    df.loc[df.accepted_name_id==name_id,'accepted_name_usage'] = json.dumps(accepted_name_usage[accepted_name_usage.accepted_name_id==name_id][['usage_id', 'reference_id', 'reference_type','publish_year', 'citation', 'is_in_taiwan']].to_dict('records'))
+                        # 取得 matched_name_usage
+                        query = """SELECT ru.taxon_name_id, ru.id, ru.reference_id, r.type, r.publish_year,
+                                 CONCAT_WS(' ' ,c.author, c.content), ru.status, ru.accepted_taxon_name_id, JSON_EXTRACT(ru.properties, '$.is_in_taiwan') 
+                                 FROM reference_usages ru 
+                                 JOIN `references` r ON ru.reference_id = r.id
+                                 LEFT JOIN api_citations c ON ru.reference_id = c.reference_id
+                                 WHERE ru.taxon_name_id IN %s AND ru.deleted_at IS NULL
+                                """
+                        with conn.cursor() as cursor:
+                            cursor.execute(query, (list(df.matched_name_id.unique()),))
+                            matched_name_usage = pd.DataFrame(cursor.fetchall(), columns=['matched_name_id', 'usage_id', 'reference_id', 
+                                                                                           'reference_type', 'publish_year', 'citation', 
+                                                                                           'usage_status', 'accepted_name_id','is_in_taiwan'])
+                            if len(matched_name_usage):
+                                matched_name_usage['reference_order'] = matched_name_usage['reference_type'].apply(lambda x: custom_reference_type_order[x])
+                                # 先處理排序 先排year再排type
+                                matched_name_usage = matched_name_usage.sort_values('publish_year', ascending=False).sort_values('reference_order')
+                                # 先處理 reference_type = 4 的
+                                matched_name_usage['publish_year'] = matched_name_usage['publish_year'].apply(lambda x: int(x) if x else None)
+                                matched_name_usage.loc[matched_name_usage.reference_type==4, 'reference_id'] = None
+                                matched_name_usage.loc[matched_name_usage.reference_type==4, 'publish_year'] = None
+                                matched_name_usage.loc[matched_name_usage.reference_type==4, 'citation'] = 'TaiCOL Backbone'
+                                matched_name_usage['reference_type'] = matched_name_usage['reference_type'].apply(lambda x: reference_type_map[x] if x else None)
+                                matched_name_usage['publish_year'] = matched_name_usage['publish_year'].fillna(0).astype(int).replace({0: None})
+                                matched_name_usage['reference_id'] = matched_name_usage['reference_id'].fillna(0).astype(int).replace({0: None})
+                                for name_id in df.matched_name_id.unique():
+                                    df.loc[df.matched_name_id==name_id,'matched_name_usage'] = json.dumps(matched_name_usage[matched_name_usage.matched_name_id==name_id][['usage_id', 'reference_id', 'reference_type',
+                                                                                                                                                                           'publish_year', 'citation', 'usage_status', 'accepted_name_id', 'is_in_taiwan']].to_dict('records'))
+                        df['matched_name_usage'] = df['matched_name_usage'].apply(json.loads)
+                        df['accepted_name_usage'] = df['accepted_name_usage'].apply(json.loads)
+                        data = df.to_dict('records')
+
+                        # for dd in :
+                            
+
+
+
+                                
+
+
 
             conn.close()
             response = {"status": {"code": 200, "message": "Success"},
-                        "info": {"total": len(df)}, "data": df.to_dict('records')}
+                        "info": {"total": len(df)}, "data": data}
 
         except Exception as er:
             print(er)
@@ -472,35 +573,53 @@ class ReferencesView(APIView):
         ]
     )
     def get(self, request, *args, **krgs):
-        if request.GET.keys() and not set(list(request.GET.keys())) <= set(['name_id']):
+        if request.GET.keys() and not set(list(request.GET.keys())) <= set(['name_id','usage_id']):
             response = {"status": {"code": 400, "message": "Bad Request: Unsupported parameters"}}
             return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
         try:
             # NOTE 這邊的alien_type是reference_usage的 不是taxon的
-            df = pd.DataFrame(columns=['reference_id', 'citation', 'status', 'indications', 'is_in_taiwan', 'is_endemic', 'alien_type','is_deleted'])
+            df = pd.DataFrame(columns=['usage_id', 'name_id', 'reference_id', 'reference_type', 'publish_year', 'citation', 'status', 'indications', 'is_in_taiwan', 'is_endemic', 'alien_type','is_deleted'])
+            conn = pymysql.connect(**db_settings)
             if name_id := request.GET.get('name_id'):
-                query = f"SELECT ru.reference_id, CONCAT_WS(' ' ,c.author, c.content), ru.status, ru.properties->>'$.indications', \
+                query = f"SELECT ru.id, ru.taxon_name_id, ru.reference_id, r.type, r.publish_year, CONCAT_WS(' ' ,c.author, c.content), ru.status, ru.properties->>'$.indications', \
                          JSON_EXTRACT(ru.properties, '$.is_in_taiwan'), JSON_EXTRACT(ru.properties, '$.is_endemic'), ru.properties->>'$.alien_type', r.deleted_at \
                          FROM reference_usages ru \
                          JOIN `references` r ON ru.reference_id = r.id \
                          JOIN api_citations c ON ru.reference_id = c.reference_id \
                          WHERE ru.taxon_name_id = %s AND r.type != 4 AND ru.status != '' \
                          AND ru.is_title != 1 AND ru.deleted_at IS NULL"  # 不給backbone
-                conn = pymysql.connect(**db_settings)
+                
                 with conn.cursor() as cursor:
                     cursor.execute(query, (name_id,))
-                    df = pd.DataFrame(cursor.fetchall(), columns=['reference_id', 'citation', 'usage_status', 'indications', 'is_in_taiwan', 'is_endemic', 'alien_type', 'is_deleted'])
-                    df = df.replace({np.nan: None})
-                    if len(df):
-                        df['is_deleted'] = df['is_deleted'].apply(lambda x: True if x else False)
-                        is_list = ['is_endemic', 'is_in_taiwan']
-                        df[is_list] = df[is_list].replace({0: False, 1: True, '0': False, '1': True})
-                        for i in df.index:
-                            row = df.iloc[i]
-                            if row.indications and row.indications != '[]':
-                                df.loc[i, 'indications'] = ','.join(eval(row.indications))
-                            else:
-                                df.loc[i, 'indications'] = None
+                    df = pd.DataFrame(cursor.fetchall(), columns=['usage_id', 'name_id', 'reference_id', 'reference_type', 'publish_year', 'citation', 'usage_status', 'indications', 'is_in_taiwan', 'is_endemic', 'alien_type', 'is_deleted'])
+
+            elif usage_id := request.GET.get('usage_id'):
+                query = f"SELECT ru.id, ru.taxon_name_id, ru.reference_id, r.type, r.publish_year, CONCAT_WS(' ' ,c.author, c.content), ru.status, ru.properties->>'$.indications', \
+                         JSON_EXTRACT(ru.properties, '$.is_in_taiwan'), JSON_EXTRACT(ru.properties, '$.is_endemic'), ru.properties->>'$.alien_type', r.deleted_at \
+                         FROM reference_usages ru \
+                         JOIN `references` r ON ru.reference_id = r.id \
+                         JOIN api_citations c ON ru.reference_id = c.reference_id \
+                         WHERE ru.id = %s AND r.type != 4 AND ru.status != '' \
+                         AND ru.is_title != 1 AND ru.deleted_at IS NULL"  # 不給backbone
+
+                with conn.cursor() as cursor:
+                    cursor.execute(query, (usage_id,))
+                    df = pd.DataFrame(cursor.fetchall(), columns=['usage_id', 'name_id', 'reference_id', 'reference_type', 'publish_year', 'citation', 'usage_status', 'indications', 'is_in_taiwan', 'is_endemic', 'alien_type', 'is_deleted'])
+
+            if len(df):
+                df = df.replace({np.nan: None})
+                df['publish_year'] = df['publish_year'].apply(lambda x: int(x) if x else None)
+                df['reference_type'] = df['reference_type'].apply(lambda x: reference_type_map[x] if x else None)
+                df['is_deleted'] = df['is_deleted'].apply(lambda x: True if x else False)
+                is_list = ['is_endemic', 'is_in_taiwan']
+                df[is_list] = df[is_list].replace({0: False, 1: True, '0': False, '1': True})
+                for i in df.index:
+                    row = df.iloc[i]
+                    if row.indications and row.indications != '[]':
+                        df.loc[i, 'indications'] = ','.join(eval(row.indications))
+                    else:
+                        df.loc[i, 'indications'] = None
+                                
                 # 加上原始文獻
                 query = f"SELECT c.reference_id, CONCAT_WS(' ' , c.author, c.content) \
                         FROM taxon_names tn \
@@ -517,9 +636,6 @@ class ReferencesView(APIView):
                 df = df.replace({np.nan: None, '': None})
                 df['reference_id'] = df['reference_id'].replace({np.nan: 0}).astype('int64').replace({0: None})
                 df['usage_status'] = df['usage_status']
-
-            else:
-                df = pd.DataFrame()
         
             response = {"status": {"code": 200, "message": "Success"},
                         "info": {"total": len(df)}, "data": df.to_dict('records')}
@@ -972,10 +1088,11 @@ class NameView(APIView):
                             LEFT JOIN api_names an ON tn.id = an.taxon_name_id \
                             LEFT JOIN api_citations c ON tn.reference_id = c.reference_id \
                             GROUP BY tn.id ORDER BY tn.id "
+            
             count_query = "SELECT COUNT(*) FROM taxon_names tn"
 
             conditions = ['tn.is_publish = 1']
-            # conditions = ['tn.deleted_at IS NULL']
+
             if updated_at:
                 if not validate(updated_at):
                     response = {"status": {"code": 400, "message": "Bad Request: Incorrect DATE(updated_at) value"}}
