@@ -475,7 +475,7 @@ class NameMatchView(APIView):
                         WHERE atu.taxon_id IN %s AND t.deleted_at IS NULL AND t1.deleted_at IS NULL"
                     cursor.execute(query, (namecode_list,))
                     df = pd.DataFrame(cursor.fetchall(), columns=['matched_name', 'matched_name_id', 'accepted_name', 'accepted_name_id', 'taxon_id', 'taicol_name_status', 'is_deleted'])
-                    df = df.replace({np.nan: None, '': None})
+                    df = df.replace({np.nan: None, '': None, 'null': None})
                     df = tmp_df.merge(df)
                     df = df.reset_index(drop=True)
                     if len(df):
@@ -495,6 +495,7 @@ class NameMatchView(APIView):
                             cursor.execute(query, (list(df.accepted_name_id.unique()),))
                             matched_name_accepted_usage = pd.DataFrame(cursor.fetchall(), columns=['accepted_name_id', 'usage_id', 'reference_id', 'reference_type', 'publish_year', 'citation', 'is_in_taiwan'])
                             if len(matched_name_accepted_usage):
+                                matched_name_accepted_usage = matched_name_accepted_usage.replace({np.nan: None, '': None, 'null': None})
                                 matched_name_accepted_usage['is_in_taiwan'] = matched_name_accepted_usage['is_in_taiwan'].replace({0: False, 1: True, '0': False, '1': True, 2: None, '2': None, '': None})                        
                                 matched_name_accepted_usage['reference_order'] = matched_name_accepted_usage['reference_type'].apply(lambda x: custom_reference_type_order[x])
                                 # 先處理排序 先排year再排type
@@ -523,6 +524,7 @@ class NameMatchView(APIView):
                                                                                            'reference_type', 'publish_year', 'citation', 
                                                                                            'usage_status', 'accepted_name_id','is_in_taiwan'])
                             if len(matched_name_usage):
+                                matched_name_usage = matched_name_usage.replace({np.nan: None, '': None, 'null': None})
                                 matched_name_usage['is_in_taiwan'] = matched_name_usage['is_in_taiwan'].replace({0: False, 1: True, '0': False, '1': True, 2: None, '2': None, '': None})
                                 matched_name_usage['reference_order'] = matched_name_usage['reference_type'].apply(lambda x: custom_reference_type_order[x])
                                 # 先處理排序 先排year再排type
@@ -577,7 +579,7 @@ class ReferencesView(APIView):
             df = pd.DataFrame(columns=['usage_id', 'name_id', 'reference_id', 'reference_type', 'publish_year', 'accepted_name_id', 'citation', 'status', 'indications', 'is_in_taiwan', 'is_endemic', 'alien_type','is_deleted'])
             conn = pymysql.connect(**db_settings)
             if name_id := request.GET.get('name_id'):
-                query = f"SELECT ru.id, ru.taxon_name_id, ru.reference_id, r.type, r.publish_year, ru.accepted_taxon_name_id, CONCAT_WS(' ' ,c.author, c.content), ru.status, ru.properties->>'$.indications', \
+                query = f"SELECT ru.id, ru.taxon_name_id, ru.reference_id, r.type, r.publish_year, CONCAT_WS(' ' ,c.author, c.content), ru.status, ru.accepted_taxon_name_id, ru.properties->>'$.indications', \
                          JSON_EXTRACT(ru.properties, '$.is_in_taiwan'), JSON_EXTRACT(ru.properties, '$.is_endemic'), ru.properties->>'$.alien_type', r.deleted_at \
                          FROM reference_usages ru \
                          JOIN `references` r ON ru.reference_id = r.id \
@@ -587,10 +589,10 @@ class ReferencesView(APIView):
                 
                 with conn.cursor() as cursor:
                     cursor.execute(query, (name_id,))
-                    df = pd.DataFrame(cursor.fetchall(), columns=['usage_id', 'name_id', 'reference_id', 'reference_type', 'publish_year', 'accepted_name_id', 'citation', 'usage_status', 'indications', 'is_in_taiwan', 'is_endemic', 'alien_type', 'is_deleted'])
+                    df = pd.DataFrame(cursor.fetchall(), columns=['usage_id', 'name_id', 'reference_id', 'reference_type', 'publish_year', 'citation', 'usage_status', 'accepted_name_id', 'indications', 'is_in_taiwan', 'is_endemic', 'alien_type', 'is_deleted'])
             # usage反查時不排除backbone
             elif usage_id := request.GET.get('usage_id'):
-                query = f"SELECT ru.id, ru.taxon_name_id, ru.reference_id, r.type, r.publish_year, ru.accepted_taxon_name_id, CONCAT_WS(' ' ,c.author, c.content), ru.status, ru.properties->>'$.indications', \
+                query = f"SELECT ru.id, ru.taxon_name_id, ru.reference_id, r.type, r.publish_year, CONCAT_WS(' ' ,c.author, c.content), ru.status, ru.accepted_taxon_name_id, ru.properties->>'$.indications', \
                          JSON_EXTRACT(ru.properties, '$.is_in_taiwan'), JSON_EXTRACT(ru.properties, '$.is_endemic'), ru.properties->>'$.alien_type', r.deleted_at \
                          FROM reference_usages ru \
                          JOIN `references` r ON ru.reference_id = r.id \
@@ -600,13 +602,11 @@ class ReferencesView(APIView):
 # AND r.type != 4
                 with conn.cursor() as cursor:
                     cursor.execute(query, (usage_id,))
-                    df = pd.DataFrame(cursor.fetchall(), columns=['usage_id', 'name_id', 'reference_id', 'reference_type', 'publish_year', 'accepted_name_id', 'citation', 'usage_status', 'indications', 'is_in_taiwan', 'is_endemic', 'alien_type', 'is_deleted'])
+                    df = pd.DataFrame(cursor.fetchall(), columns=['usage_id', 'name_id', 'reference_id', 'reference_type', 'publish_year', 'citation', 'usage_status', 'accepted_name_id', 'indications', 'is_in_taiwan', 'is_endemic', 'alien_type', 'is_deleted'])
 
             if len(df):
-                df = df.replace({np.nan: None})
-
+                df = df.replace({np.nan: None, 'null': None})
                 df['publish_year'] = df['publish_year'].apply(lambda x: int(x) if x else None)
-
                 df.loc[df.reference_type==4, 'reference_id'] = None
                 df.loc[df.reference_type==4, 'publish_year'] = None
                 df.loc[df.reference_type==4, 'citation'] = 'TaiCOL Backbone'
@@ -643,7 +643,7 @@ class ReferencesView(APIView):
                     for r in results:
                         if r[0] not in df.reference_id.to_list():
                             # 這邊不會有backbone
-                            data.append({'name_id': name_id, 'reference_id': r[0], 'reference_type': reference_type_map[r[2]], 'publish_year': int(r[3]), 'citation': r[1], 'usage_status': 'accepted'})
+                            data.append({'name_id': int(name_id), 'reference_id': r[0], 'reference_type': reference_type_map[r[2]], 'publish_year': int(r[3]), 'citation': r[1], 'usage_status': 'accepted'})
             conn.close()
         
             response = {"status": {"code": 200, "message": "Success"},
