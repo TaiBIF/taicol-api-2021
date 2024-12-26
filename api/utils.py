@@ -313,8 +313,10 @@ def get_conditioned_solr_search(req):
     habitat_list = ['is_terrestrial','is_freshwater','is_brackish','is_marine']
     habitat_cond = []
     for i in habitat_list:
-        if req.get(i):
+        if req.get(i) == 'true':
             habitat_cond.append("{}:true".format(i))
+        elif req.get(i) == 'false':
+            habitat_cond.append("{}:false".format(i))
 
     if habitat_cond:
         query_list.append(f"({' OR '.join(habitat_cond)})")
@@ -322,9 +324,16 @@ def get_conditioned_solr_search(req):
 
     is_list = ['is_endemic','is_fossil','is_in_taiwan','is_hybrid','including_not_official']
 
+    # TODO 待確認
     for i in is_list:
-        if req.get(i):
+        if req.get(i) == 'true':
             query_list.append("{}:true".format(i))
+        elif req.get(i) == 'false':
+            query_list.append("{}:false".format(i))
+
+    # if reg.get('is_in_taiwn')
+    # 預設為true
+    # query_list.append("is_in_taiwan:{}".format(req.get('is_in_taiwan','true')))
 
 
     # alien_type

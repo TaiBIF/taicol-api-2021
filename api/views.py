@@ -642,13 +642,15 @@ class ReferencesView(APIView):
                                 
                 df = df.replace({np.nan: None, '': None})
                 df['reference_id'] = df['reference_id'].replace({np.nan: 0}).astype('int64').replace({0: None})
+                df['usage_id'] = df['usage_id'].replace({np.nan: 0}).astype('int64').replace({0: None})
+                df['accepted_name_id'] = df['accepted_name_id'].replace({np.nan: 0}).astype('int64').replace({0: None})
                 df = df.drop(columns=['reference_order'])
                 data = df.to_dict('records')
 
                 new_data = []
                 for d in data:
                     if not d.get('usage_id'):
-                        poping_keys = [k for k in df.keys() if k not in [ 'name_id', 'reference_id', 'reference_type', 'publish_year', 'citation',  'usage_status']]
+                        poping_keys = [k for k in df.keys() if k not in ['name_id', 'reference_id', 'reference_type', 'publish_year', 'citation',  'usage_status']]
                         for p in poping_keys:
                             d.pop(p)
                     new_data.append(d)
