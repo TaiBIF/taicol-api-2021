@@ -442,7 +442,7 @@ class NameMatchView(APIView):
                     # 中英比對
                     if bio_group in bio_group_map.keys():
                         bio_group = bio_group_map[bio_group]
-                    query_dict['taxon_group'] = bio_group
+                    query_dict['bio_group'] = bio_group
 
                 # print(query_dict)
 
