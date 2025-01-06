@@ -52,12 +52,19 @@ custom_reference_type_order = {
 
 bio_group_map = {
     "Insects": "昆蟲",
+    "Spiders": "蜘蛛",
     "Fishes": "魚類",
     "Reptiles": "爬蟲類",
+    "Amphibians": "兩棲類",
     "Birds": "鳥類",
     "Mammals": "哺乳類",
     "Vascular Plants": "維管束植物",
+    "Ferns": "蕨類植物",
+    "Mosses": "苔蘚植物",
+    "Algae": "藻類",
     "Viruses": "病毒",
+    "Bacteria": "細菌",
+    "Fungi": "真菌",
 }
 
 
@@ -437,14 +444,13 @@ class NameMatchView(APIView):
 
                 # bio_group 比對常見類群
 
-                bio_group = request.GET.get('bio_group')
-                if bio_group != 'all':
-                    # 中英比對
-                    if bio_group in bio_group_map.keys():
-                        bio_group = bio_group_map[bio_group]
+                if bio_group := request.GET.get('bio_group'):
+                    if bio_group != 'all':
+                        # 中英比對
+                        if bio_group in bio_group_map.keys():
+                            bio_group = bio_group_map[bio_group]
                     query_dict['bio_group'] = bio_group
 
-                # print(query_dict)
 
                 resp = requests.post(match_url, data=query_dict)
 
