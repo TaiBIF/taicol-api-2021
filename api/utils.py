@@ -31,13 +31,13 @@ status_map = {'accepted': 'Accepted', 'misapplied': 'Misapplied', 'not-accepted'
 
 
 redlist_map = {
-  'EX': 'NEX', 'EW': 'NEW', 'RE': 'NRE', 'CR': 'NCR', 'EN': 'NEN', 'VU': 'NVU', 'NT': 'NNT',
-  'LC': 'NLC', 'DD': 'NDD', 'NA': 'NA', 'NE': 'NE'
+  'EX': 'EX', 'EW': 'EW', 'RE': 'RE', 'CR': 'NCR', 'EN': 'NEN', 'VU': 'NVU', 'NT': 'NNT',
+  'LC': 'NLC', 'DD': 'DD', 'NA': 'NA', 'NE': 'NE'
 }
 
 redlist_map_rev = {
-  'NEX': 'EX', 'NEW': 'EW', 'NRE': 'RE', 'NCR': 'CR', 'NEN': 'EN', 'NVU': 'VU', 'NNT': 'NT',
-  'NLC': 'LC', 'NDD': 'DD', 'NA': 'NA', 'NE': 'NE'
+  'EX': 'EX', 'EW': 'EW', 'RE': 'RE', 'NCR': 'CR', 'NEN': 'EN', 'NVU': 'VU', 'NNT': 'NT',
+  'NLC': 'LC', 'DD': 'DD', 'NA': 'NA', 'NE': 'NE'
 }
 
 cites_map = { 'I': '1','II':'2','III':'3','NC':'NC'}
