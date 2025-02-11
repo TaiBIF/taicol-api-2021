@@ -93,49 +93,6 @@ def web_stat_stat(request):
         for tt in result_df.title.unique():
             response[tt] = result_df[result_df.title==tt][['category','count','total_count']].to_dict('records')
         response['kingdom_compare'] = result_df[result_df.title=='kingdom_count'][['category','count','total_count']].to_dict('records')
-        # # 各界物種數
-        # query = """SELECT category, count FROM api_web_stat WHERE title = 'kingdom_count'"""  
-        # cursor.execute(query)
-        # results = cursor.fetchall()
-        # response['kingdom_count'] = results
-        # # 各階層數量
-        # query = """SELECT category, count FROM api_web_stat WHERE title = 'rank_count'"""  
-        # cursor.execute(query)
-        # results = cursor.fetchall()
-        # response['rank_count'] = results
-        # # 各類生物種數&特有比例
-        # query = """SELECT category, count, total_count FROM api_web_stat WHERE title = 'endemic_count'"""  
-        # cursor.execute(query)
-        # results = cursor.fetchall()
-        # response['endemic_count'] = results
-        # # 物種來源比例
-        # query = """SELECT category, count FROM api_web_stat WHERE title = 'source_count'"""  
-        # cursor.execute(query)
-        # results = cursor.fetchall()
-        # response['source_count'] = results
-
-
-        # # 全球物種數比較
-        # query = """SELECT category, count, total_count FROM api_web_stat WHERE title = 'kingdom_count'"""  
-        # cursor.execute(query)
-        # results = cursor.fetchall()
-        # response['kingdom_compare'] = results
-        # query = """SELECT category, count, total_count FROM api_web_stat WHERE title = 'animalia_compare'"""  
-        # cursor.execute(query)
-        # results = cursor.fetchall()
-        # response['animalia_compare'] = results
-        # query = """SELECT category, count, total_count FROM api_web_stat WHERE title = 'arthropoda_compare'"""  
-        # cursor.execute(query)
-        # results = cursor.fetchall()
-        # response['arthropoda_compare'] = results
-        # query = """SELECT category, count, total_count FROM api_web_stat WHERE title = 'chordata_compare'"""  
-        # cursor.execute(query)
-        # results = cursor.fetchall()
-        # response['chordata_compare'] = results
-        # query = """SELECT category, count, total_count FROM api_web_stat WHERE title = 'plantae_compare'"""  
-        # cursor.execute(query)
-        # results = cursor.fetchall()
-        # response['plantae_compare'] = results
         # 全球物種數比較總表
         query = """SELECT path, total_count, count, provider FROM api_web_table"""  
         cursor.execute(query)
