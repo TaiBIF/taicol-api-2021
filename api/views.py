@@ -734,6 +734,12 @@ class TaxonView(APIView):
                 type=openapi.TYPE_STRING
             ),
             openapi.Parameter(
+                name='scientific_name',
+                in_=openapi.IN_QUERY,
+                description='學名',
+                type=openapi.TYPE_STRING
+            ),
+            openapi.Parameter(
                 name='taxon_group',
                 in_=openapi.IN_QUERY,
                 description='分類群',
@@ -893,7 +899,6 @@ class TaxonView(APIView):
             resp = requests.post(f'{SOLR_PREFIX}taxa/select?', data=query_req, headers={'content-type': "application/json" })
             resp = resp.json()
 
-
             count = resp['response']['numFound']
 
             # 這邊應該要改成docs才對 因為有可能給了錯誤的offset 造成沒有回傳docs
@@ -1046,6 +1051,8 @@ class NameView(APIView):
             # 如果有重複的參數，只考慮最後面的那個 (default)
             name_id = request.GET.get('name_id', '').strip()
             scientific_name = request.GET.get('scientific_name', '').strip()
+            scientific_name = remove_rank_char(scientific_name)
+
             updated_at = request.GET.get('updated_at', '').strip().strip('"').strip("'")
             created_at = request.GET.get('created_at', '').strip().strip('"').strip("'")
             taxon_group = request.GET.get('taxon_group', '').strip()
@@ -1101,8 +1108,8 @@ class NameView(APIView):
                 base_query = f"{base_query} WHERE tn.id = '{name_id}'"
                 count_query = f"{count_query} WHERE tn.id = '{name_id}'"
             elif scientific_name:  # 不考慮分類群, scientific_name, updated_at, created_at
-                base_query = f"{base_query} WHERE tn.name = '{scientific_name}'"
-                count_query = f"{count_query} WHERE tn.name = '{scientific_name}'"
+                base_query = f"{base_query} WHERE tn.search_name = '{scientific_name}'"
+                count_query = f"{count_query} WHERE tn.search_name = '{scientific_name}'"
                 for c in conditions:
                     base_query += " AND " + c
                     count_query += " AND " + c

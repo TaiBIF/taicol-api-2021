@@ -284,6 +284,14 @@ def get_variants(string):
   return new_string
 
 
+
+def remove_rank_char(text):
+    replace_words = [' subsp. ',' nothosubsp.',' var. ',' subvar. ',' nothovar. ',' fo. ',' subf. ',' f.sp. ',' race ',' strip ',' m. ',' ab. ',' × ']
+    pattern = '|'.join(map(re.escape, replace_words))
+    text = re.sub(pattern, ' ', text)
+    return text
+
+
 def get_conditioned_solr_search(req): 
 
     query_list = []
@@ -305,7 +313,7 @@ def get_conditioned_solr_search(req):
     name_query_list = []
 
     if keyword := req.get('scientific_name','').strip():
-
+        keyword = remove_rank_char(keyword)
         keyword = get_variants(keyword)
         name_query_list.append('search_name:/{}/'.format(keyword))
 
@@ -338,11 +346,19 @@ def get_conditioned_solr_search(req):
         resp = requests.post(f'{SOLR_PREFIX}taxa/select?', data=query_req, headers={'content-type': "application/json" })
         resp = resp.json()
 
-        taxon_ids = [t.get('val') for t in resp['facets']['taxon_id']['buckets']]
-        
-        if taxon_ids:
-            query_list.append('taxon_id:({})'.format(' OR '.join(taxon_ids)))
+        # 找不到的話也要限制回傳
 
+        if resp['facets']['count'] > 0:
+
+            taxon_ids = [t.get('val') for t in resp['facets']['taxon_id']['buckets']]
+        
+            if taxon_ids:
+                query_list.append('taxon_id:({})'.format(' OR '.join(taxon_ids)))
+            else:
+                query_list.append('-*:*')
+
+        else:
+            query_list.append('-*:*')
 
     rank = req.get('rank')
     if rank:
