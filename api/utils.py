@@ -283,10 +283,20 @@ def get_variants(string):
       new_string = new_string.replace(char,f"{var_df_2.loc[i, 'pattern']}")
   return new_string
 
+spe_chars = ['+','-', '&','&&', '||', '!','(', ')', '{', '}', '[', ']', '^', '"', '~', '*', '?', ':', '/', '.']
+
+def escape_solr_query(string):
+    final_string = ''
+    for s in string:
+        if s in spe_chars:
+            final_string += f'\{s}'
+        else:
+            final_string += s
+    return final_string
 
 
 def remove_rank_char(text):
-    replace_words = [' subsp. ',' nothosubsp.',' var. ',' subvar. ',' nothovar. ',' fo. ',' subf. ',' f.sp. ',' race ',' strip ',' m. ',' ab. ',' × ']
+    replace_words = [' subsp. ',' nothosubsp.',' var. ',' subvar. ',' nothovar. ',' fo. ',' subf. ',' f.sp. ',' race ',' strip ',' m. ',' ab. ',' × ','× ']
     pattern = '|'.join(map(re.escape, replace_words))
     text = re.sub(pattern, ' ', text)
     return text
@@ -313,9 +323,13 @@ def get_conditioned_solr_search(req):
     name_query_list = []
 
     if keyword := req.get('scientific_name','').strip():
-        keyword = remove_rank_char(keyword)
+        keyword_wo_rank = remove_rank_char(keyword)
+        keyword_wo_rank = get_variants(keyword_wo_rank)
+
+        keyword = escape_solr_query(keyword)
         keyword = get_variants(keyword)
-        name_query_list.append('search_name:/{}/'.format(keyword))
+        # name_query_list.append('search_name:/{}/'.format(keyword))
+        name_query_list.append(f"search_name:/{keyword}/ OR search_name_wo_rank:/{keyword_wo_rank}/")
 
     if common_name_keyword := req.get('common_name','').strip():
 

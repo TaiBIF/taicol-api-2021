@@ -1108,8 +1108,8 @@ class NameView(APIView):
                 base_query = f"{base_query} WHERE tn.id = '{name_id}'"
                 count_query = f"{count_query} WHERE tn.id = '{name_id}'"
             elif scientific_name:  # 不考慮分類群, scientific_name, updated_at, created_at
-                base_query = f"{base_query} WHERE tn.search_name = '{scientific_name}'"
-                count_query = f"{count_query} WHERE tn.search_name = '{scientific_name}'"
+                base_query = f"{base_query} WHERE tn.search_name = '{remove_rank_char(scientific_name)}' OR tn.name = '{scientific_name}' "
+                count_query = f"{count_query} WHERE tn.search_name = '{remove_rank_char(scientific_name)}' OR tn.name = '{scientific_name}' "
                 for c in conditions:
                     base_query += " AND " + c
                     count_query += " AND " + c
