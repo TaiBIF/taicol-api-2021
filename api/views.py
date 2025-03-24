@@ -426,8 +426,8 @@ class NameMatchView(APIView):
                                 }
                                 namecode_list.append(d['namecode'])
                                 tmp_df = pd.concat([tmp_df, pd.DataFrame([tmp_dict])], ignore_index=True)
-
             if namecode_list:
+                s = time.time()
                 # 先抓原本的資料 後面再抓accepted_usage
                 with conn.cursor() as cursor:
                     query = f"SELECT distinct t.name, t.id, t1.name, t1.id, atu.taxon_id, atu.status, at.is_deleted \
@@ -1109,7 +1109,7 @@ class NameView(APIView):
                 count_query = f"{count_query} WHERE tn.id = '{name_id}'"
             elif scientific_name:  # 不考慮分類群, scientific_name, updated_at, created_at
                 base_query = f"{base_query} WHERE tn.search_name = '{remove_rank_char(scientific_name)}' OR tn.name = '{scientific_name}' "
-                count_query = f"{count_query} WHERE tn.search_name = '{remove_rank_char(scientific_name)}' OR tn.name = '{scientific_name}' "
+                count_query = f"{count_query}  WHERE tn.search_name = '{remove_rank_char(scientific_name)}' OR tn.name = '{scientific_name}' "
                 for c in conditions:
                     base_query += " AND " + c
                     count_query += " AND " + c
@@ -1177,15 +1177,11 @@ class NameView(APIView):
                 cursor.execute(count_query)
                 len_total = cursor.fetchall()[0][0]
 
-
-                # print(query)
-                # print(count_query)
                 # only rank >= 34 has 物種學名分欄 & original_name_id
                 if len(df):
                     df.loc[df['rank'] < 34, 'name'] = '{}'
                     df.loc[df['rank'] < 34, 'original_name_id'] = None
                     df['rank'] = df['rank'].apply(lambda x: rank_map[x])
-                
 
                 # find hybrid_parent
                 df['hybrid_parent'] = None
@@ -1209,26 +1205,30 @@ class NameView(APIView):
                 if len(df):
 
                     # 加上taxon
-                    with conn.cursor() as cursor:     
-                        query = """
-                        WITH cte
-                            AS
-                            (
-                                SELECT distinct atu.taxon_name_id, atu.taxon_id, atu.status, at.is_in_taiwan
-                                FROM api_taxon_usages atu
-                                LEFT JOIN api_taxon at ON at.taxon_id = atu.taxon_id
-                                WHERE atu.taxon_name_id IN %s  and at.is_deleted != 1
-                            )
-                        SELECT taxon_name_id, 
-                        JSON_ARRAYAGG(JSON_OBJECT('taxon_id', taxon_id, 'status', status, 'is_in_taiwan', is_in_taiwan))
-                        FROM cte GROUP BY taxon_name_id;
-                        """
-                        cursor.execute(query, (df.name_id.to_list(),))
-                        taxon_df = pd.DataFrame(cursor.fetchall(), columns=['name_id', 'taxon'])
+
+                    query = { "query": "*:*",
+                        "offset": 0,
+                        "limit": 1000000,
+                        "filter": ['taxon_name_id:({})'.format(' OR '.join([str(n) for n in df.name_id.to_list()])), 'is_deleted:false', ],
+                        "fields": ['taxon_id', 'status', 'is_in_taiwan','taxon_name_id']
+                        }
+                    
+                    query_req = json.dumps(query)
+
+                    resp = requests.post(f'{SOLR_PREFIX}taxa/select?', data=query_req, headers={'content-type': "application/json" })
+                    resp = resp.json()
+
+                    # print(resp)
+                    taxon_df = pd.DataFrame(resp['response']['docs'])
+                    if len(taxon_df):
+                        taxon_df['taxon_name_id'] = taxon_df['taxon_name_id'].astype(int)
+                        taxon_df = taxon_df.rename(columns={'taxon_name_id': 'name_id'})
+                        taxon_df = taxon_df.groupby('name_id').apply(lambda x: x[['taxon_id', 'status', 'is_in_taiwan']].to_dict('records')).reset_index(name='taxon')
+
                         for i in taxon_df.index:
                             row = taxon_df.iloc[i]
-                            taxon_tmp = json.loads(row.taxon)
-                            taxon_tmp = pd.DataFrame(taxon_tmp)
+                            # taxon_tmp = json.loads(row.taxon)
+                            taxon_tmp = pd.DataFrame(row.taxon)
                             # 排序規則： 
                             # Taiwan+有效 accepted
                             # Taiwan+無效 not-accepted
@@ -1238,7 +1238,7 @@ class NameView(APIView):
                             taxon_tmp['is_in_taiwan'] = taxon_tmp['is_in_taiwan'].replace({0: False, 1: True, '0': False, '1': True, '2': False, None: False})
                             taxon_tmp = taxon_tmp.rename(columns={'status': 'taicol_name_status'})
                             taxon_tmp = taxon_tmp[['taxon_id','taicol_name_status','is_in_taiwan']]
-                            taxon_df.loc[i,'taxon'] = taxon_tmp.to_json(orient='records')
+                            taxon_df.loc[i,'taxon'] = taxon_tmp.to_json(orient='records') 
 
                     if len(taxon_df):
                         df = df.merge(taxon_df, how='left')    
