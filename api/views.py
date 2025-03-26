@@ -427,7 +427,6 @@ class NameMatchView(APIView):
                                 namecode_list.append(d['namecode'])
                                 tmp_df = pd.concat([tmp_df, pd.DataFrame([tmp_dict])], ignore_index=True)
             if namecode_list:
-                s = time.time()
                 # 先抓原本的資料 後面再抓accepted_usage
                 with conn.cursor() as cursor:
                     query = f"SELECT distinct t.name, t.id, t1.name, t1.id, atu.taxon_id, atu.status, at.is_deleted \
