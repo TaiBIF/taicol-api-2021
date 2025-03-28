@@ -38,15 +38,17 @@ reference_type_map = {
     3: 'Book',
     4: 'Backbone',
     5: 'Checklist',
+    6: 'Backbone'
 }
 
 # type= 1 or 2 or 3 地位是相同的 
 custom_reference_type_order = {
-    1: 1,
-    2: 1,
-    3: 1,
-    4: 3,
-    5: 2,
+    1: 2,
+    2: 2,
+    3: 2,
+    4: 4,
+    5: 3,
+    6: 1
 }
 
 
@@ -464,9 +466,9 @@ class NameMatchView(APIView):
                                 matched_name_accepted_usage = matched_name_accepted_usage.sort_values('publish_year', ascending=False).sort_values('reference_order')
                                 # 先處理 reference_type = 4 的
                                 matched_name_accepted_usage['publish_year'] = matched_name_accepted_usage['publish_year'].apply(lambda x: int(x) if x else None)
-                                matched_name_accepted_usage.loc[matched_name_accepted_usage.reference_type==4, 'reference_id'] = None
-                                matched_name_accepted_usage.loc[matched_name_accepted_usage.reference_type==4, 'publish_year'] = None
-                                matched_name_accepted_usage.loc[matched_name_accepted_usage.reference_type==4, 'citation'] = 'TaiCOL Backbone'
+                                matched_name_accepted_usage.loc[matched_name_accepted_usage.reference_type.isin([4,6]), 'reference_id'] = None
+                                matched_name_accepted_usage.loc[matched_name_accepted_usage.reference_type.isin([4,6]), 'publish_year'] = None
+                                matched_name_accepted_usage.loc[matched_name_accepted_usage.reference_type.isin([4,6]), 'citation'] = 'TaiCOL Backbone'
                                 matched_name_accepted_usage['reference_type'] = matched_name_accepted_usage['reference_type'].apply(lambda x: reference_type_map[x] if x else None)
                                 matched_name_accepted_usage['publish_year'] = matched_name_accepted_usage['publish_year'].fillna(0).astype(int).replace({0: None})
                                 matched_name_accepted_usage['reference_id'] = matched_name_accepted_usage['reference_id'].fillna(0).astype(int).replace({0: None})
@@ -493,9 +495,9 @@ class NameMatchView(APIView):
                                 matched_name_usage = matched_name_usage.sort_values('publish_year', ascending=False).sort_values('reference_order')
                                 # 先處理 reference_type = 4 的
                                 matched_name_usage['publish_year'] = matched_name_usage['publish_year'].apply(lambda x: int(x) if x else None)
-                                matched_name_usage.loc[matched_name_usage.reference_type==4, 'reference_id'] = None
-                                matched_name_usage.loc[matched_name_usage.reference_type==4, 'publish_year'] = None
-                                matched_name_usage.loc[matched_name_usage.reference_type==4, 'citation'] = 'TaiCOL Backbone'
+                                matched_name_usage.loc[matched_name_usage.reference_type.isin([4,6]), 'reference_id'] = None
+                                matched_name_usage.loc[matched_name_usage.reference_type.isin([4,6]), 'publish_year'] = None
+                                matched_name_usage.loc[matched_name_usage.reference_type.isin([4,6]), 'citation'] = 'TaiCOL Backbone'
                                 matched_name_usage['reference_type'] = matched_name_usage['reference_type'].apply(lambda x: reference_type_map[x] if x else None)
                                 matched_name_usage['publish_year'] = matched_name_usage['publish_year'].fillna(0).astype(int).replace({0: None})
                                 matched_name_usage['reference_id'] = matched_name_usage['reference_id'].fillna(0).astype(int).replace({0: None})
@@ -585,9 +587,9 @@ class ReferencesView(APIView):
                 df['publish_year'] = df['publish_year'].apply(lambda x: int(x) if x else None)
                 df['reference_order'] = df['reference_type'].apply(lambda x: custom_reference_type_order[x])
                 df = df.sort_values('publish_year', ascending=False).sort_values('reference_order')
-                df.loc[df.reference_type==4, 'reference_id'] = None
-                df.loc[df.reference_type==4, 'publish_year'] = None
-                df.loc[df.reference_type==4, 'citation'] = 'TaiCOL Backbone'
+                df.loc[df.reference_type.isin([4,6]), 'reference_id'] = None
+                df.loc[df.reference_typ.isin([4,6]), 'publish_year'] = None
+                df.loc[df.reference_type.isin([4,6]), 'citation'] = 'TaiCOL Backbone'
                 df['reference_type'] = df['reference_type'].apply(lambda x: reference_type_map[x] if x else None)
                 df['publish_year'] = df['publish_year'].fillna(0).astype(int).replace({0: None})
                 df['reference_id'] = df['reference_id'].fillna(0).astype(int).replace({0: None})
