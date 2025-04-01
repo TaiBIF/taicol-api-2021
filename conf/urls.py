@@ -52,4 +52,5 @@ urlpatterns = [
     url(r'^redoc/$', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
     path('web/stat/index', api_view.web_index_stat),
     path('web/stat/statistics', api_view.web_stat_stat),
+    path('update_check_usage', api_view.update_check_usage),
 ]

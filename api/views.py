@@ -1294,3 +1294,20 @@ class NameView(APIView):
 
         return HttpResponse(json.dumps(response, ensure_ascii=False, cls=DateTimeEncoder), content_type="application/json,charset=utf-8")
         # https://www.django-rest-framework.org/api-guide/exceptions/
+
+
+def update_check_usage(request):
+    try:
+        # 只接受從工具傳來的request
+        if 'nametool.taicol.tw' in request.META.get('HTTP_HOST') or 'staging.taicol.tw' in request.META.get('HTTP_HOST'):
+            a = check_taxon_usage()
+            response = {"status": {"code": 200, "message": "Usage checked!"}}
+        else:
+            response = {"status": {"code": 403, "message": "Forbidden"}}
+
+    except Exception as er:
+        print(er)
+        response = {"status": {"code": 500, "message": "Unexpected Error"}}
+
+    return HttpResponse(json.dumps(response))
+

@@ -6,6 +6,7 @@ from datetime import datetime
 import json
 import numpy as np
 import requests
+from numpy import nan
 
 db_settings = {
     "host": env('DB_HOST'),
@@ -487,9 +488,298 @@ def get_conditioned_solr_search(req):
 
 
 
+def check_taxon_usage():
+    # 每日更新檢查usage
+
+    # NOTE 以下都不考慮reference_id=95 因為只是單純的俗名backbone
+
+    conn = pymysql.connect(**db_settings)
+
+    # 取得當前的白名單
+
+    # 1. 同模出現在不同分類群
+
+    query = "SELECT reference_usage_id FROM api_usage_whitelist WHERE whitelist_type = 1"
+    with conn.cursor() as cursor:
+        execute_line = cursor.execute(query)
+        whitelist_list_1 = cursor.fetchall()
+        whitelist_list_1 = [r[0] for r in whitelist_list_1]
+
+    # 2. 同學名出現在不同分類群
+
+    query = "SELECT taxon_name_id FROM api_usage_whitelist WHERE whitelist_type = 2"
+    with conn.cursor() as cursor:
+        execute_line = cursor.execute(query)
+        whitelist_list_2 = cursor.fetchall()
+        whitelist_list_2 = [r[0] for r in whitelist_list_2]
+
+    # 3. 一組 reference_id, accepted_taxon_name_id, taxon_name_id, 對到多個ru_id
+
+    query = "SELECT accepted_taxon_name_id, taxon_name_id, reference_id FROM api_usage_whitelist WHERE whitelist_type = 3"
+    with conn.cursor() as cursor:
+        execute_line = cursor.execute(query)
+        whitelist_list_3 = pd.DataFrame(cursor.fetchall(), columns=['accepted_taxon_name_id', 'taxon_name_id', 'reference_id'])
+
+    query = """SELECT ru.id, ru.status, ru.accepted_taxon_name_id, ru.taxon_name_id, ru.reference_id, tn.object_group, tn.autonym_group,
+                        r.properties ->> '$.check_list_type'
+                FROM reference_usages ru 
+                JOIN taxon_names tn ON tn.id = ru.taxon_name_id
+                JOIN `references` r ON r.id = ru.reference_id
+                WHERE ru.is_title != 1 AND ru.status NOT IN ("", "undetermined") AND ru.deleted_at IS NULL AND ru.accepted_taxon_name_id IS NOT NULL 
+            """
+    with conn.cursor() as cursor:
+        execute_line = cursor.execute(query)
+        ref_group_pair_total = cursor.fetchall()
+        ref_group_pair_total = pd.DataFrame(ref_group_pair_total, columns=['ru_id', 'ru_status', 'accepted_taxon_name_id', 'taxon_name_id', 'reference_id',
+                                                                        'object_group', 'autonym_group', 'check_list_type'])
+        ref_group_pair_total = ref_group_pair_total.replace({nan:None}) 
+        ref_group_pair_total = ref_group_pair_total[ref_group_pair_total.check_list_type != 4] # !=4 寫在query裡會排除掉null
+        # 排除reference_id = 95
+        ref_group_pair_total = ref_group_pair_total[ref_group_pair_total.reference_id!=95]
+        ref_group_pair_total = ref_group_pair_total.drop_duplicates()
+        ref_group_pair_total = ref_group_pair_total.reset_index(drop=True)
+        ref_group_pair_total = ref_group_pair_total.replace({nan:None})
+
+    # 1. 是不是有fixed usage_id 被刪除
+    error_type = 1
+
+    query = "select fixed_reference_usage_id from api_taxon where is_deleted = 0 and fixed_reference_usage_id in (select id from reference_usages where deleted_at is not null);"
+
+    with conn.cursor() as cursor:
+        execute_line = cursor.execute(query)
+        deleted_fixed_usages = cursor.fetchall()
+        for d in deleted_fixed_usages:
+            with conn.cursor() as cursor:
+                query = """INSERT INTO api_usage_check (reference_usage_id, error_type) VALUES (%s, %s)
+                            ON DUPLICATE KEY UPDATE 
+                            updated_at = current_timestamp;
+                        """ 
+                execute_line = cursor.execute(query, (d[0], error_type))
+                conn.commit()
+
+    # 2. autonym / 同模：同一篇文獻 在不同分類群 同時出現 accepted和not-acceped
+
+    error_type = 2
+
+
+    check_obj_data = ref_group_pair_total[(~ref_group_pair_total.ru_id.isin(whitelist_list_1))&(ref_group_pair_total.ru_status!='misapplied')][['object_group','reference_id','ru_status','accepted_taxon_name_id']].drop_duplicates().groupby(['reference_id','object_group'],as_index=False).nunique()
+    check_obj_data = check_obj_data[(check_obj_data.ru_status>1)&(check_obj_data.accepted_taxon_name_id>1)][['object_group','reference_id']]
+
+    oo_to_check = []
+    # 應該要在同一個ref才行
+    for oo in check_obj_data.to_dict('records'):
+        # 無效名的接受名不是同模就不行
+        rows = ref_group_pair_total[(~ref_group_pair_total.ru_id.isin(check_obj_data))&(ref_group_pair_total.ru_status=='not-accepted')&(ref_group_pair_total.object_group==oo.get('object_group'))&(ref_group_pair_total.reference_id==oo.get('reference_id'))]
+        acp_ids = rows.accepted_taxon_name_id.to_list()
+        for aaa in acp_ids:
+            if not len(ref_group_pair_total[(ref_group_pair_total.taxon_name_id==aaa)&(ref_group_pair_total.object_group==oo.get('object_group'))]):
+                oo_to_check.append(oo.get('object_group'))
+
+    rows_to_check = check_obj_data[check_obj_data.object_group.isin(oo_to_check)].merge(ref_group_pair_total)
+    rows_to_check = rows_to_check[~rows_to_check.ru_id.isin(whitelist_list_1)].to_dict('records')
+
+    for row in rows_to_check:
+        with conn.cursor() as cursor:
+            query = """INSERT INTO api_usage_check (reference_usage_id, autonym_group, object_group, error_type) VALUES (%s, %s, %s, %s)
+                            ON DUPLICATE KEY UPDATE 
+                            updated_at = current_timestamp;
+                        """ 
+            execute_line = cursor.execute(query, (row.get('reference_usage_id'), row.get('autonym_group'), row.get('object_group'), error_type))
+            conn.commit()
+
+    # 3. autonym / 同模：同一篇文獻中有多個not-accepted在不同分類群。
+
+    error_type = 3
+
+
+    check_obj_data = ref_group_pair_total[(~ref_group_pair_total.ru_id.isin(whitelist_list_1))&(ref_group_pair_total.ru_status=='not-accepted')][['object_group','reference_id','accepted_taxon_name_id']].drop_duplicates().groupby(['reference_id','object_group'],as_index=False).nunique()
+    check_obj_data_list = check_obj_data[check_obj_data.accepted_taxon_name_id>1].to_dict('records')
+
+    oo_to_check = []
+    # 應該要在同一個ref才行
+    for oo in check_obj_data_list:
+        # 無效名的接受名不是同模就不行
+        acp_ids = ref_group_pair_total[(~ref_group_pair_total.ru_id.isin(whitelist_list_1))&(ref_group_pair_total.ru_status=='not-accepted')&(ref_group_pair_total.object_group==oo.get('object_group'))&(ref_group_pair_total.reference_id==oo.get('reference_id'))].accepted_taxon_name_id.to_list()
+        for aaa in acp_ids:
+            if not len(ref_group_pair_total[(ref_group_pair_total.taxon_name_id==aaa)&(ref_group_pair_total.object_group==oo.get('object_group'))]):
+                oo_to_check.append(oo.get('object_group'))
+
+    rows_to_check = check_obj_data[check_obj_data.object_group.isin(oo_to_check)].merge(ref_group_pair_total)
+    rows_to_check = rows_to_check[~rows_to_check.ru_id.isin(whitelist_list_1)].to_dict('records')
+
+    for row in rows_to_check:
+        with conn.cursor() as cursor:
+            query = """INSERT INTO api_usage_check (reference_usage_id, autonym_group, object_group, error_type) VALUES (%s, %s, %s, %s)
+                            ON DUPLICATE KEY UPDATE 
+                            updated_at = current_timestamp;
+                        """ 
+            execute_line = cursor.execute(query, (row.get('reference_usage_id'), row.get('autonym_group'), row.get('object_group'), error_type))
+            conn.commit()
+
+
+    # 4. 同模（不包含autonym）：同一篇文獻中多個accepted
+
+    error_type = 4
+
+
+    check_obj_data = ref_group_pair_total[(~ref_group_pair_total.ru_id.isin(whitelist_list_1))&(ref_group_pair_total.autonym_group.isnull())&(ref_group_pair_total.object_group.notnull())&(ref_group_pair_total.ru_status=='accepted')][['object_group','taxon_name_id','reference_id']].drop_duplicates().groupby(['reference_id','object_group'],as_index=False).nunique()
+    check_obj_data_list = check_obj_data[check_obj_data.taxon_name_id>1].to_dict('records')
+
+    rows_to_check = []
+    for cc in check_obj_data_list:
+        rows = ref_group_pair_total[(~ref_group_pair_total.ru_id.isin(whitelist_list_1))&(ref_group_pair_total.ru_status=='accepted')&(ref_group_pair_total.object_group==cc.get('object_group'))&(ref_group_pair_total.reference_id==cc.get('reference_id'))]
+        rows_to_check = pd.concat([rows, rows_to_check],ignore_index=True)
+
+
+    if len(rows_to_check):
+        rows_to_check = rows_to_check[~rows_to_check.ru_id.isin(whitelist_list_1)].to_dict('records')
+
+    for row in rows_to_check:
+        with conn.cursor() as cursor:
+            query = """INSERT INTO api_usage_check (reference_usage_id, autonym_group, object_group, error_type) VALUES (%s, %s, %s, %s)
+                            ON DUPLICATE KEY UPDATE 
+                            updated_at = current_timestamp;
+                        """ 
+            execute_line = cursor.execute(query, (row.get('reference_usage_id'), row.get('autonym_group'), row.get('object_group'), error_type))
+            conn.commit()
+
+
+    # 5. 確認accepted_taxon_name_id, taxon_name_id, reference_id是不是只對到一個status
+
+    error_type = 5
+
+
+    check_ru_unique = ref_group_pair_total[['accepted_taxon_name_id', 'taxon_name_id', 'reference_id', 'ru_status']]
+    a = check_ru_unique.groupby(['accepted_taxon_name_id', 'taxon_name_id', 'reference_id'],as_index=False).count()
+    a = a[a.ru_status>1]
+
+    df_diff = a.merge(whitelist_list_3, on=['accepted_taxon_name_id', 'taxon_name_id', 'reference_id'], how='left', indicator=True)
+    df_result = df_diff[df_diff['_merge'] == 'left_only'].drop(columns=['_merge'])
+
+    for row in df_result.to_dict('records'):
+        with conn.cursor() as cursor:
+            query = """INSERT INTO api_usage_check (accepted_taxon_name_id, taxon_name_id, reference_id, error_type) VALUES (%s, %s, %s, %s)
+                            ON DUPLICATE KEY UPDATE 
+                            updated_at = current_timestamp;
+                        """ 
+            execute_line = cursor.execute(query, (row.get('accepted_taxon_name_id'), row.get('taxon_name_id'), row.get('reference_id'), error_type))
+            conn.commit()
+
+
+    # 6. 學名在同一篇文獻中 被設定成兩個分類群的同物異名
+
+    error_type = 6
+
+
+    check_not_accepted_unique = ref_group_pair_total[ref_group_pair_total.ru_status=='not-accepted'][['accepted_taxon_name_id', 'taxon_name_id', 'reference_id']].drop_duplicates()
+    b = check_not_accepted_unique.groupby(['taxon_name_id', 'reference_id'],as_index=False).count()
+    b = b[(b.accepted_taxon_name_id>1) & (~b.taxon_name_id.isin(whitelist_list_2))]
+
+    for row in b.to_dict('records'):
+        with conn.cursor() as cursor:
+            query = """INSERT INTO api_usage_check (taxon_name_id, reference_id, error_type) VALUES (%s, %s, %s)
+                            ON DUPLICATE KEY UPDATE 
+                            updated_at = current_timestamp;
+                        """ 
+            execute_line = cursor.execute(query, (row.get('taxon_name_id'), row.get('reference_id'), error_type))
+            conn.commit()
+
+
+    # 7. 同一個分類群有一個以上的接受名
+
+    error_type = 7
 
 
 
+    all_pair = ref_group_pair_total[['accepted_taxon_name_id','reference_id']].drop_duplicates()
+    check_pair = ref_group_pair_total[ref_group_pair_total.ru_status=='accepted'][['accepted_taxon_name_id','reference_id','ru_status']].drop_duplicates()
+    a = check_pair.groupby(['accepted_taxon_name_id','reference_id'],as_index=False).count()
+    a = all_pair.merge(a, how='left')
+
+    a_more = a[a.ru_status > 1]
+
+    for row in a_more.to_dict('records'):
+        with conn.cursor() as cursor:
+            query = """INSERT INTO api_usage_check (accepted_taxon_name_id, reference_id, error_type) VALUES (%s, %s, %s)
+                            ON DUPLICATE KEY UPDATE 
+                            updated_at = current_timestamp;
+                        """ 
+            execute_line = cursor.execute(query, (row.get('accepted_taxon_name_id'), row.get('reference_id'), error_type))
+            conn.commit()
+
+
+    # 8. 同一個分類群裡面沒有任何接受名
+
+    error_type = 8
+
+
+    a_none = a[a.ru_status.isna()]
+
+    for row in a_none.to_dict('records'):
+        with conn.cursor() as cursor:
+            query = """INSERT INTO api_usage_check (accepted_taxon_name_id, reference_id, error_type) VALUES (%s, %s, %s)
+                            ON DUPLICATE KEY UPDATE 
+                            updated_at = current_timestamp;
+                        """ 
+            execute_line = cursor.execute(query, (row.get('accepted_taxon_name_id'), row.get('reference_id'), error_type))
+            conn.commit()
+
+
+    # 9. 同一個學名出現在同一篇文獻中的兩個分類群(不同accepted_taxon_name_id) 且不是誤用
+    # 可能和前面有重複 但前面只有考慮同模 沒有考慮到單純學名相同
+
+    error_type = 9
+
+
+    all_pair = ref_group_pair_total[ref_group_pair_total.ru_status!='misapplied'][['accepted_taxon_name_id','reference_id','taxon_name_id']].drop_duplicates()
+    a = all_pair.groupby(['reference_id','taxon_name_id'],as_index=False).count()
+    a = a[(a.accepted_taxon_name_id>1)& (~a.taxon_name_id.isin(whitelist_list_2))]
+
+
+    for row in a.to_dict('records'):
+        with conn.cursor() as cursor:
+            query = """INSERT INTO api_usage_check (taxon_name_id, reference_id, error_type) VALUES (%s, %s, %s)
+                            ON DUPLICATE KEY UPDATE 
+                            updated_at = current_timestamp;
+                        """ 
+            execute_line = cursor.execute(query, (row.get('taxon_name_id'), row.get('reference_id'), error_type))
+            conn.commit()
+
+
+    # 10. 一組 reference_id, accepted_taxon_name_id, taxon_name_id, 只對到一個ru_id
+
+    error_type = 10
+
+
+    a = ref_group_pair_total[['ru_id','reference_id','accepted_taxon_name_id','taxon_name_id']].drop_duplicates()
+    a = a.groupby(['reference_id','accepted_taxon_name_id','taxon_name_id'], as_index=False).count()
+    a = a[a.ru_id>1]
+
+    df_diff = a.merge(whitelist_list_3, on=['accepted_taxon_name_id', 'taxon_name_id', 'reference_id'], how='left', indicator=True)
+    df_result = df_diff[df_diff['_merge'] == 'left_only'].drop(columns=['_merge'])
+
+    for row in df_result.to_dict('records'):
+        with conn.cursor() as cursor:
+            query = """INSERT INTO api_usage_check (accepted_taxon_name_id, taxon_name_id, reference_id, error_type) VALUES (%s, %s, %s, %s)
+                            ON DUPLICATE KEY UPDATE 
+                            updated_at = current_timestamp;
+                        """ 
+            execute_line = cursor.execute(query, (row.get('accepted_taxon_name_id'), row.get('taxon_name_id'), row.get('reference_id'), error_type))
+            conn.commit()
+
+    # 新增error_type = 11 for 記錄檢查的時間
+    with conn.cursor() as cursor:
+        query = """INSERT INTO api_usage_check (error_type, updated_at) VALUES (11, current_timestamp)
+                                    ON DUPLICATE KEY UPDATE 
+                            updated_at = current_timestamp;
+
+                    """ 
+        execute_line = cursor.execute(query)
+        conn.commit()
+
+    return 'done!'
+
+# TODO 每日更新的話 要排除掉已經insert的usage
 
 # taxon_id = request.GET.get('taxon_id', '').strip()
 # taxon_group = request.GET.get('taxon_group', '').strip()

@@ -59,20 +59,8 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-CORS_ALLOWED_ORIGINS = [
-    "http://127.0.0.1:8007",
-    "http://taicol.tw",
-    "https://taicol.tw",
-    # "http://127.0.0.1:3000",
-    # "http://localhost:3000",
-    # "http://taicol.ink.net.tw",
-    # "http://tacicol.ink.net.tw:3000",
-    # "https://taicol.ink.net.tw",
-    # "https://tacicol.ink.net.tw:3000",
-    # "http://taicol.ink.net.tw:3001/",
-    "http://web-staging.taicol.tw",
-    "https://web-staging.taicol.tw",
-]
+CORS_ALLOWED_ORIGINS = env.list('CORS_ALLOWED_ORIGINS', default=[])
+
 
 CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^https://\w+\.taicol\.tw$",
@@ -82,6 +70,7 @@ CORS_ALLOWED_ORIGIN_REGEXES = [
 CORS_ALLOW_METHODS = [
     "GET",
     "POST",
+    "OPTIONS",
 ]
 
 
