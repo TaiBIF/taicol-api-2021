@@ -1,5 +1,7 @@
 
-version: '3.7'
+networks:
+  gateway:
+    external: true
 
 services:
   web:
@@ -10,15 +12,12 @@ services:
     volumes:
       - .:/code
       - ../taicol-volumes/static:/code/conf/static
-      # - ../taicol-volumes/data:/code/data
-    # expose:
-    #   - 8002
     ports:
       - 8002:8002
-    # tty: true
-    # stdin_open: true
     env_file:
       - .env
+    networks:
+      - gateway
     # labels:
     #   - "traefik.enable=true"
     #   - "traefik.http.routers.whoami.rule=Host(`api-staging.taicol.tw`)"
