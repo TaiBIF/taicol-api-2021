@@ -592,7 +592,7 @@ def check_taxon_usage():
                             ON DUPLICATE KEY UPDATE 
                             updated_at = %s;
                         """ 
-            execute_line = cursor.execute(query, (row.get('reference_usage_id'), row.get('autonym_group'), row.get('object_group'), error_type, now, now))
+            execute_line = cursor.execute(query, (row.get('ru_id'), row.get('autonym_group'), row.get('object_group'), error_type, now, now))
             conn.commit()
 
     # 3. autonym / 同模：同一篇文獻中有多個not-accepted在不同分類群。
@@ -625,7 +625,7 @@ def check_taxon_usage():
                             ON DUPLICATE KEY UPDATE 
                             updated_at = %s;
                         """ 
-            execute_line = cursor.execute(query, (row.get('reference_usage_id'), row.get('autonym_group'), row.get('object_group'), error_type, now, now))
+            execute_line = cursor.execute(query, (row.get('ru_id'), row.get('autonym_group'), row.get('object_group'), error_type, now, now))
             conn.commit()
 
 
@@ -637,7 +637,7 @@ def check_taxon_usage():
     check_obj_data = ref_group_pair_total[(~ref_group_pair_total.ru_id.isin(whitelist_list_1))&(ref_group_pair_total.autonym_group.isnull())&(ref_group_pair_total.object_group.notnull())&(ref_group_pair_total.ru_status=='accepted')][['object_group','taxon_name_id','reference_id']].drop_duplicates().groupby(['reference_id','object_group'],as_index=False).nunique()
     check_obj_data_list = check_obj_data[check_obj_data.taxon_name_id>1].to_dict('records')
 
-    rows_to_check = []
+    rows_to_check = pd.DataFrame()
     for cc in check_obj_data_list:
         rows = ref_group_pair_total[(~ref_group_pair_total.ru_id.isin(whitelist_list_1))&(ref_group_pair_total.ru_status=='accepted')&(ref_group_pair_total.object_group==cc.get('object_group'))&(ref_group_pair_total.reference_id==cc.get('reference_id'))]
         rows_to_check = pd.concat([rows, rows_to_check],ignore_index=True)
@@ -653,7 +653,7 @@ def check_taxon_usage():
                             ON DUPLICATE KEY UPDATE 
                             updated_at = %s;
                         """ 
-            execute_line = cursor.execute(query, (row.get('reference_usage_id'), row.get('autonym_group'), row.get('object_group'), error_type, now, now))
+            execute_line = cursor.execute(query, (row.get('ru_id'), row.get('autonym_group'), row.get('object_group'), error_type, now, now))
             conn.commit()
 
 
