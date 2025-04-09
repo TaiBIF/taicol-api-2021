@@ -6,7 +6,7 @@ from datetime import datetime
 import json
 import numpy as np
 import requests
-from numpy import nan
+
 
 db_settings = {
     "host": env('DB_HOST'),
@@ -532,13 +532,13 @@ def check_taxon_usage():
         ref_group_pair_total = cursor.fetchall()
         ref_group_pair_total = pd.DataFrame(ref_group_pair_total, columns=['ru_id', 'ru_status', 'accepted_taxon_name_id', 'taxon_name_id', 'reference_id',
                                                                         'object_group', 'autonym_group', 'check_list_type'])
-        ref_group_pair_total = ref_group_pair_total.replace({nan:None}) 
+        # ref_group_pair_total = ref_group_pair_total.replace({np.nan:None}) 
         ref_group_pair_total = ref_group_pair_total[ref_group_pair_total.check_list_type != 4] # !=4 寫在query裡會排除掉null
         # 排除reference_id = 95
         ref_group_pair_total = ref_group_pair_total[ref_group_pair_total.reference_id!=95]
         ref_group_pair_total = ref_group_pair_total.drop_duplicates()
         ref_group_pair_total = ref_group_pair_total.reset_index(drop=True)
-        ref_group_pair_total = ref_group_pair_total.replace({nan:None})
+        ref_group_pair_total = ref_group_pair_total.replace({np.nan:None})
 
     # 1. 是不是有fixed usage_id 被刪除
     error_type = 1
