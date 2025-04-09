@@ -2,10 +2,11 @@ import re
 from conf.settings import env, SOLR_PREFIX
 import pymysql
 import pandas as pd
-from datetime import datetime
 import json
 import numpy as np
 import requests
+from django.utils import timezone
+from datetime import datetime, timedelta
 
 
 db_settings = {
@@ -55,6 +56,7 @@ with conn.cursor() as cursor:
     rank_map_c = dict(zip([r[0] for r in ranks], [eval(r[1])['zh-tw'] for r in ranks]))
     rank_map_c_reverse = dict(zip([eval(r[1])['zh-tw'] for r in ranks],[r[0] for r in ranks]))
     rank_order_map = dict(zip([r[0] for r in ranks], [r[2] for r in ranks]))
+
 conn.close()
 
 # 林奈階層
@@ -540,27 +542,29 @@ def check_taxon_usage():
         ref_group_pair_total = ref_group_pair_total.reset_index(drop=True)
         ref_group_pair_total = ref_group_pair_total.replace({np.nan:None})
 
+    now = timezone.now() + timedelta(hours=8)
+
     # 1. 是不是有fixed usage_id 被刪除
     error_type = 1
 
     query = "select fixed_reference_usage_id from api_taxon where is_deleted = 0 and fixed_reference_usage_id in (select id from reference_usages where deleted_at is not null);"
+    
 
     with conn.cursor() as cursor:
         execute_line = cursor.execute(query)
         deleted_fixed_usages = cursor.fetchall()
         for d in deleted_fixed_usages:
             with conn.cursor() as cursor:
-                query = """INSERT INTO api_usage_check (reference_usage_id, error_type) VALUES (%s, %s)
+                query = """INSERT INTO api_usage_check (reference_usage_id, error_type, updated_at) VALUES (%s, %s, %s)
                             ON DUPLICATE KEY UPDATE 
-                            updated_at = current_timestamp;
+                            updated_at = %s;
                         """ 
-                execute_line = cursor.execute(query, (d[0], error_type))
+                execute_line = cursor.execute(query, (d[0], error_type, now, now))
                 conn.commit()
 
     # 2. autonym / 同模：同一篇文獻 在不同分類群 同時出現 accepted和not-acceped
 
     error_type = 2
-
 
     check_obj_data = ref_group_pair_total[(~ref_group_pair_total.ru_id.isin(whitelist_list_1))&(ref_group_pair_total.ru_status!='misapplied')][['object_group','reference_id','ru_status','accepted_taxon_name_id']].drop_duplicates().groupby(['reference_id','object_group'],as_index=False).nunique()
     check_obj_data = check_obj_data[(check_obj_data.ru_status>1)&(check_obj_data.accepted_taxon_name_id>1)][['object_group','reference_id']]
@@ -575,16 +579,20 @@ def check_taxon_usage():
             if not len(ref_group_pair_total[(ref_group_pair_total.taxon_name_id==aaa)&(ref_group_pair_total.object_group==oo.get('object_group'))]):
                 oo_to_check.append(oo.get('object_group'))
 
-    rows_to_check = check_obj_data[check_obj_data.object_group.isin(oo_to_check)].merge(ref_group_pair_total)
-    rows_to_check = rows_to_check[~rows_to_check.ru_id.isin(whitelist_list_1)].to_dict('records')
+    for col in check_obj_data.columns:
+        check_obj_data[col] = check_obj_data[col].astype(ref_group_pair_total[col].dtype)
 
-    for row in rows_to_check:
+    rows_to_check = check_obj_data[check_obj_data.object_group.isin(oo_to_check)].merge(ref_group_pair_total)
+    rows_to_check = rows_to_check[~rows_to_check.ru_id.isin(whitelist_list_1)]
+    rows_to_check = rows_to_check.replace({None: 0})
+
+    for row in rows_to_check.to_dict('records'):
         with conn.cursor() as cursor:
-            query = """INSERT INTO api_usage_check (reference_usage_id, autonym_group, object_group, error_type) VALUES (%s, %s, %s, %s)
+            query = """INSERT INTO api_usage_check (reference_usage_id, autonym_group, object_group, error_type, updated_at) VALUES (%s, %s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE 
-                            updated_at = current_timestamp;
+                            updated_at = %s;
                         """ 
-            execute_line = cursor.execute(query, (row.get('reference_usage_id'), row.get('autonym_group'), row.get('object_group'), error_type))
+            execute_line = cursor.execute(query, (row.get('reference_usage_id'), row.get('autonym_group'), row.get('object_group'), error_type, now, now))
             conn.commit()
 
     # 3. autonym / 同模：同一篇文獻中有多個not-accepted在不同分類群。
@@ -604,16 +612,20 @@ def check_taxon_usage():
             if not len(ref_group_pair_total[(ref_group_pair_total.taxon_name_id==aaa)&(ref_group_pair_total.object_group==oo.get('object_group'))]):
                 oo_to_check.append(oo.get('object_group'))
 
-    rows_to_check = check_obj_data[check_obj_data.object_group.isin(oo_to_check)].merge(ref_group_pair_total)
-    rows_to_check = rows_to_check[~rows_to_check.ru_id.isin(whitelist_list_1)].to_dict('records')
+    for col in check_obj_data.columns:
+        check_obj_data[col] = check_obj_data[col].astype(ref_group_pair_total[col].dtype)
 
-    for row in rows_to_check:
+    rows_to_check = check_obj_data[check_obj_data.object_group.isin(oo_to_check)].merge(ref_group_pair_total)
+    rows_to_check = rows_to_check[~rows_to_check.ru_id.isin(whitelist_list_1)]
+    rows_to_check = rows_to_check.replace({None: 0})
+
+    for row in rows_to_check.to_dict('records'):
         with conn.cursor() as cursor:
-            query = """INSERT INTO api_usage_check (reference_usage_id, autonym_group, object_group, error_type) VALUES (%s, %s, %s, %s)
+            query = """INSERT INTO api_usage_check (reference_usage_id, autonym_group, object_group, error_type, updated_at) VALUES (%s, %s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE 
-                            updated_at = current_timestamp;
+                            updated_at = %s;
                         """ 
-            execute_line = cursor.execute(query, (row.get('reference_usage_id'), row.get('autonym_group'), row.get('object_group'), error_type))
+            execute_line = cursor.execute(query, (row.get('reference_usage_id'), row.get('autonym_group'), row.get('object_group'), error_type, now, now))
             conn.commit()
 
 
@@ -632,15 +644,16 @@ def check_taxon_usage():
 
 
     if len(rows_to_check):
-        rows_to_check = rows_to_check[~rows_to_check.ru_id.isin(whitelist_list_1)].to_dict('records')
+        rows_to_check = rows_to_check[~rows_to_check.ru_id.isin(whitelist_list_1)]
+        rows_to_check = rows_to_check.replace({None: 0})
 
-    for row in rows_to_check:
+    for row in rows_to_check.to_dict('records'):
         with conn.cursor() as cursor:
-            query = """INSERT INTO api_usage_check (reference_usage_id, autonym_group, object_group, error_type) VALUES (%s, %s, %s, %s)
+            query = """INSERT INTO api_usage_check (reference_usage_id, autonym_group, object_group, error_type, updated_at) VALUES (%s, %s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE 
-                            updated_at = current_timestamp;
+                            updated_at = %s;
                         """ 
-            execute_line = cursor.execute(query, (row.get('reference_usage_id'), row.get('autonym_group'), row.get('object_group'), error_type))
+            execute_line = cursor.execute(query, (row.get('reference_usage_id'), row.get('autonym_group'), row.get('object_group'), error_type, now, now))
             conn.commit()
 
 
@@ -653,16 +666,21 @@ def check_taxon_usage():
     a = check_ru_unique.groupby(['accepted_taxon_name_id', 'taxon_name_id', 'reference_id'],as_index=False).count()
     a = a[a.ru_status>1]
 
+    for col in a.columns:
+        if col in whitelist_list_3.keys():
+            a[col] = a[col].astype(whitelist_list_3[col].dtype)
+
     df_diff = a.merge(whitelist_list_3, on=['accepted_taxon_name_id', 'taxon_name_id', 'reference_id'], how='left', indicator=True)
     df_result = df_diff[df_diff['_merge'] == 'left_only'].drop(columns=['_merge'])
+    df_result = df_result.replace({None: 0})
 
     for row in df_result.to_dict('records'):
         with conn.cursor() as cursor:
-            query = """INSERT INTO api_usage_check (accepted_taxon_name_id, taxon_name_id, reference_id, error_type) VALUES (%s, %s, %s, %s)
+            query = """INSERT INTO api_usage_check (accepted_taxon_name_id, taxon_name_id, reference_id, error_type, updated_at) VALUES (%s, %s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE 
-                            updated_at = current_timestamp;
+                            updated_at = %s;
                         """ 
-            execute_line = cursor.execute(query, (row.get('accepted_taxon_name_id'), row.get('taxon_name_id'), row.get('reference_id'), error_type))
+            execute_line = cursor.execute(query, (row.get('accepted_taxon_name_id'), row.get('taxon_name_id'), row.get('reference_id'), error_type, now, now))
             conn.commit()
 
 
@@ -670,18 +688,18 @@ def check_taxon_usage():
 
     error_type = 6
 
-
     check_not_accepted_unique = ref_group_pair_total[ref_group_pair_total.ru_status=='not-accepted'][['accepted_taxon_name_id', 'taxon_name_id', 'reference_id']].drop_duplicates()
     b = check_not_accepted_unique.groupby(['taxon_name_id', 'reference_id'],as_index=False).count()
     b = b[(b.accepted_taxon_name_id>1) & (~b.taxon_name_id.isin(whitelist_list_2))]
+    b = b.replace({None: 0})
 
     for row in b.to_dict('records'):
         with conn.cursor() as cursor:
-            query = """INSERT INTO api_usage_check (taxon_name_id, reference_id, error_type) VALUES (%s, %s, %s)
+            query = """INSERT INTO api_usage_check (taxon_name_id, reference_id, error_type, updated_at) VALUES (%s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE 
-                            updated_at = current_timestamp;
+                            updated_at = %s;
                         """ 
-            execute_line = cursor.execute(query, (row.get('taxon_name_id'), row.get('reference_id'), error_type))
+            execute_line = cursor.execute(query, (row.get('taxon_name_id'), row.get('reference_id'), error_type, now, now))
             conn.commit()
 
 
@@ -690,21 +708,21 @@ def check_taxon_usage():
     error_type = 7
 
 
-
     all_pair = ref_group_pair_total[['accepted_taxon_name_id','reference_id']].drop_duplicates()
     check_pair = ref_group_pair_total[ref_group_pair_total.ru_status=='accepted'][['accepted_taxon_name_id','reference_id','ru_status']].drop_duplicates()
     a = check_pair.groupby(['accepted_taxon_name_id','reference_id'],as_index=False).count()
     a = all_pair.merge(a, how='left')
 
     a_more = a[a.ru_status > 1]
+    a_more = a_more.replace({None: 0})
 
     for row in a_more.to_dict('records'):
         with conn.cursor() as cursor:
-            query = """INSERT INTO api_usage_check (accepted_taxon_name_id, reference_id, error_type) VALUES (%s, %s, %s)
+            query = """INSERT INTO api_usage_check (accepted_taxon_name_id, reference_id, error_type, updated_at) VALUES (%s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE 
-                            updated_at = current_timestamp;
+                            updated_at = %s;
                         """ 
-            execute_line = cursor.execute(query, (row.get('accepted_taxon_name_id'), row.get('reference_id'), error_type))
+            execute_line = cursor.execute(query, (row.get('accepted_taxon_name_id'), row.get('reference_id'), error_type, now, now))
             conn.commit()
 
 
@@ -714,14 +732,15 @@ def check_taxon_usage():
 
 
     a_none = a[a.ru_status.isna()]
+    a_none = a_none.replace({None: 0})
 
     for row in a_none.to_dict('records'):
         with conn.cursor() as cursor:
-            query = """INSERT INTO api_usage_check (accepted_taxon_name_id, reference_id, error_type) VALUES (%s, %s, %s)
+            query = """INSERT INTO api_usage_check (accepted_taxon_name_id, reference_id, error_type, updated_at) VALUES (%s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE 
-                            updated_at = current_timestamp;
+                            updated_at = %s;
                         """ 
-            execute_line = cursor.execute(query, (row.get('accepted_taxon_name_id'), row.get('reference_id'), error_type))
+            execute_line = cursor.execute(query, (row.get('accepted_taxon_name_id'), row.get('reference_id'), error_type, now, now))
             conn.commit()
 
 
@@ -734,15 +753,16 @@ def check_taxon_usage():
     all_pair = ref_group_pair_total[ref_group_pair_total.ru_status!='misapplied'][['accepted_taxon_name_id','reference_id','taxon_name_id']].drop_duplicates()
     a = all_pair.groupby(['reference_id','taxon_name_id'],as_index=False).count()
     a = a[(a.accepted_taxon_name_id>1)& (~a.taxon_name_id.isin(whitelist_list_2))]
+    a = a.replace({None: 0})
 
 
     for row in a.to_dict('records'):
         with conn.cursor() as cursor:
-            query = """INSERT INTO api_usage_check (taxon_name_id, reference_id, error_type) VALUES (%s, %s, %s)
+            query = """INSERT INTO api_usage_check (taxon_name_id, reference_id, error_type, updated_at) VALUES (%s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE 
-                            updated_at = current_timestamp;
+                            updated_at = %s;
                         """ 
-            execute_line = cursor.execute(query, (row.get('taxon_name_id'), row.get('reference_id'), error_type))
+            execute_line = cursor.execute(query, (row.get('taxon_name_id'), row.get('reference_id'), error_type, now, now))
             conn.commit()
 
 
@@ -757,24 +777,25 @@ def check_taxon_usage():
 
     df_diff = a.merge(whitelist_list_3, on=['accepted_taxon_name_id', 'taxon_name_id', 'reference_id'], how='left', indicator=True)
     df_result = df_diff[df_diff['_merge'] == 'left_only'].drop(columns=['_merge'])
+    df_result = df_result.replace({None: 0})
 
     for row in df_result.to_dict('records'):
         with conn.cursor() as cursor:
-            query = """INSERT INTO api_usage_check (accepted_taxon_name_id, taxon_name_id, reference_id, error_type) VALUES (%s, %s, %s, %s)
+            query = """INSERT INTO api_usage_check (accepted_taxon_name_id, taxon_name_id, reference_id, error_type, updated_at) VALUES (%s, %s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE 
-                            updated_at = current_timestamp;
+                            updated_at = %s;
                         """ 
-            execute_line = cursor.execute(query, (row.get('accepted_taxon_name_id'), row.get('taxon_name_id'), row.get('reference_id'), error_type))
+            execute_line = cursor.execute(query, (row.get('accepted_taxon_name_id'), row.get('taxon_name_id'), row.get('reference_id'), error_type, now, now))
             conn.commit()
 
     # 新增error_type = 11 for 記錄檢查的時間
     with conn.cursor() as cursor:
-        query = """INSERT INTO api_usage_check (error_type, updated_at) VALUES (11, current_timestamp)
+        query = """INSERT INTO api_usage_check (error_type, updated_at) VALUES (11, %s)
                                     ON DUPLICATE KEY UPDATE 
-                            updated_at = current_timestamp;
+                            updated_at = %s;
 
                     """ 
-        execute_line = cursor.execute(query)
+        execute_line = cursor.execute(query, (now, now))
         conn.commit()
 
     return 'done!'
