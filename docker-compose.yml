@@ -1,5 +1,3 @@
-version: '3.7'
-
 services:
   web:
     build: .
@@ -8,8 +6,6 @@ services:
     command: /srv/start
     volumes:
       - .:/code
-      - ../taicol-volumes/static:/code/conf/static
-      # - ../taicol-volumes/data:/code/data
     ports:
       - 8005:8005
     env_file:
