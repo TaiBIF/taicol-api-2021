@@ -26,12 +26,9 @@ services:
     volumes:
       - ./scripts/nginx/staging:/etc/nginx/conf.d
     networks:
-      - gateway
       - traefik-api
     labels:
       - "traefik.enable=true"
-      - "traefik.http.middlewares.redirect-https.redirectscheme.scheme=https"
-      - "traefik.http.routers.nginx-api.entrypoints=web"
       - "traefik.http.routers.nginx-api.rule=Host(`api-staging.taicol.tw`)"
       - "traefik.http.routers.nginx-api.entrypoints=websecure"
       - "traefik.http.routers.nginx-api.tls.certresolver=myresolver"
