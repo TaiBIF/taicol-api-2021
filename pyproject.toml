@@ -5,18 +5,17 @@ description = ""
 authors = ["jinyinglee <45194511+jinyinglee@users.noreply.github.com>"]
 
 [tool.poetry.dependencies]
-python = "^3.8"
-Django = "^3.2.9"
+python = "^3.10"
+Django = "^4.0"
 django-environ = "^0.8.1"
 PyMySQL = "^1.0.2"
 cryptography = "^35.0.0"
 gunicorn = "^20.1.0"
-pandas = "^1.3.4"
+pandas = "^2.2.0"
 djangorestframework = "^3.12.4"
 drf-yasg = "^1.20.0"
-lxml = "^4.9.0"
-bs4 = "^0.0.1"
 django-cors-headers = "^3.13.0"
+requests = "^2.27.1"
 
 [tool.poetry.group.dev.dependencies]
 
