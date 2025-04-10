@@ -25,6 +25,7 @@ services:
     volumes:
       - ./scripts/nginx/staging:/etc/nginx/conf.d
     networks:
+      - gateway
       - traefik-api
     labels:
       - "traefik.enable=true"
