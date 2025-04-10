@@ -14,8 +14,7 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
-from django.urls import path, include
-from django.conf.urls import url
+from django.urls import path, include, re_path
 from api import views as api_view
 
 # swagger API
@@ -47,9 +46,9 @@ urlpatterns = [
     path('nameMatch', api_view.NameMatchView.as_view()),
     path('namecode', api_view.NamecodeView.as_view()),
     path('taxonVersion', api_view.TaxonVersionView.as_view()),
-    url(r'^swagger(?P<format>\.json|\.yaml)$', schema_view.without_ui(cache_timeout=0), name='schema-json'),
-    url(r'^swagger/$', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
-    url(r'^redoc/$', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
+    re_path(r'^swagger(?P<format>\.json|\.yaml)$', schema_view.without_ui(cache_timeout=0), name='schema-json'),
+    re_path(r'^swagger/$', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
+    re_path(r'^redoc/$', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
     path('web/stat/index', api_view.web_index_stat),
     path('web/stat/statistics', api_view.web_stat_stat),
     path('update_check_usage', api_view.update_check_usage),
