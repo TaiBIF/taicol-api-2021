@@ -1,4 +1,8 @@
-version: '3.7'
+networks:
+  gateway:
+    external: true
+  traefik-api:
+    external: true
 
 services:
   web:
@@ -8,11 +12,23 @@ services:
     command: /srv/start
     volumes:
       - .:/code
-      - ../taicol-volumes/static:/code/conf/static
-    ports:
-      - 8002:8002
-    tty: true
-    stdin_open: true
+    expose:
+      - 8002
     env_file:
       - .env
-
+    networks:
+      - gateway
+      - traefik-api
+  nginx-api:
+    image: nginx:1.19.10-alpine
+    container_name: nginx-api
+    restart: always
+    volumes:
+      - ./scripts/nginx/production:/etc/nginx/conf.d
+    networks:
+      - traefik-api
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.nginx-api.rule=Host(`api.taicol.tw`)"
+      - "traefik.http.routers.nginx-api.entrypoints=websecure"
+      - "traefik.http.routers.nginx-api.tls.certresolver=myresolver"
