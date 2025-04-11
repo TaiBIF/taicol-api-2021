@@ -12,6 +12,7 @@ services:
     command: /srv/start
     volumes:
       - .:/code
+      - ../taicol-volumes/static:/code/conf/static
     expose:
       - 8002
     env_file:

@@ -6,6 +6,7 @@ services:
     command: /srv/start
     volumes:
       - .:/code
+      - ../taicol-volumes/static:/code/conf/static
     ports:
       - 8005:8005
     env_file:

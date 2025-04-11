@@ -7,6 +7,7 @@ import numpy as np
 import requests
 from django.utils import timezone
 from datetime import datetime, timedelta
+from typing import List, Dict
 
 
 db_settings = {
@@ -109,182 +110,82 @@ def to_middlename_abbr(content):
         return re.sub(r"(\w).*", r"\1.", content)
 
 
-var_df = pd.DataFrame([
-('綠','[綠綠]'),
-('綠','[綠綠]'),
-('來','[來來]'),
-('來','[來來]'),
-('狀','[狀狀]'),
-('狀','[狀狀]'),
-('羽','[羽羽]'),
-('羽','[羽羽]'),
-('金','[金金]'),
-('金','[金金]'),
-('柳','[柳柳]'),
-('柳','[柳柳]'),
-('利','[利利]'),
-('利','[利利]'),
-('呂','[呂呂]'),
-('呂','[呂呂]'),
-('輪','[輪輪]'),
-('輪','[輪輪]'),
-('梨','[梨梨]'),
-('梨','[梨梨]'),
-('里','[里里]'),
-('里','[里里]'),
-('裡','[裡裡]'),
-('裡','[裡裡]'),
-('律','[律律]'),
-('律','[律律]'),
-('離','[離離]'),
-('離','[離離]'),
-('琉','[琉琉]'),
-('琉','[琉琉]'),
-('良','[良良]'),
-('良','[良良]'),
-('輻','[輻輻]'),
-('輻','[輻輻]'),
-('裂','[裂裂]'),
-('裂','[裂裂]'),
-('笠','[笠笠]'),
-('笠','[笠笠]'),
-('蘭','[蘭蘭]'),
-('蘭','[蘭蘭]'),
-('鲃','[鲃䰾]'),
-('䰾','[鲃䰾]'),
-('刺','[刺刺]'),
-('刺','[刺刺]'),
-('葉','[葉葉]'),
-('葉','[葉葉]'),
-('鈎','[鈎鉤]'),
-('鉤','[鈎鉤]'),
-('臺','[臺台]'),
-('台','[臺台]'),
-('螺','[螺螺]'),
-('螺','[螺螺]'),
-('羣','[群羣]'),
-('群','[群羣]'),
-('峯','[峯峰]'),
-('峰','[峯峰]'),
-('曬','[晒曬]'),
-('晒','[晒曬]'),
-('裏','[裏裡]'),
-('裡','[裏裡]'),
-('薦','[荐薦]'),
-('荐','[荐薦]'),
-('艷','[豔艷]'),
-('豔','[豔艷]'),
-('粧','[妝粧]'),
-('妝','[妝粧]'),
-('濕','[溼濕]'),
-('溼','[溼濕]'),
-('樑','[梁樑]'),
-('梁','[梁樑]'),
-('秘','[祕秘]'),
-('祕','[祕秘]'),
-('污','[汙污]'),
-('汙','[汙污]'),
-('册','[冊册]'),
-('冊','[冊册]'),
-('唇','[脣唇]'),
-('脣','[脣唇]'),
-('朶','[朵朶]'),
-('朵','[朵朶]'),
-('鷄','[雞鷄]'),
-('雞','[雞鷄]'),
-('猫','[貓猫]'),
-('貓','[貓猫]'),
-('踪','[蹤踪]'),
-('蹤','[蹤踪]'),
-('恒','[恆恒]'),
-('恆','[恆恒]'),
-('獾','[貛獾]'),
-('貛','[貛獾]'),
-('万','[萬万]'),
-('萬','[萬万]'),
-('两','[兩两]'),
-('兩','[兩两]'),
-('椮','[槮椮]'),
-('槮','[槮椮]'),
-('体','[體体]'),
-('體','[體体]'),
-('鳗','[鰻鳗]'),
-('鰻','[鰻鳗]'),
-('蝨','[虱蝨]'),
-('虱','[虱蝨]'),
-('鲹','[鰺鲹]'),
-('鰺','[鰺鲹]'),
-('鳞','[鱗鳞]'),
-('鱗','[鱗鳞]'),
-('鳊','[鯿鳊]'),
-('鯿','[鯿鳊]'),
-('鯵','[鰺鯵]'),
-('鰺','[鰺鯵]'),
-('鲨','[鯊鲨]'),
-('鯊','[鯊鲨]'),
-('鹮','[䴉鹮]'),
-('䴉','[䴉鹮]'),
-('鴴','(行鳥|鴴)'),
-('鵐','(鵐|巫鳥)'),
-('䱵','(䱵|魚翁)'),
-('䲗','(䲗|魚銜)'),
-('䱀','(䱀|魚央)'),
-('䳭','(䳭|即鳥)'),
-('鱼','[魚鱼]'),
-('魚','[魚鱼]'),
-('鹨','[鷚鹨]'),
-('鷚','[鷚鹨]'),
-('蓟','[薊蓟]'),
-('薊','[薊蓟]'),
-('黒','[黑黒]'),
-('黑','[黑黒]'),
-('隠','[隱隠]'),
-('隱','[隱隠]'),
-('黄','[黃黄]'),
-('黃','[黃黄]'),
-('囓','[嚙囓]'),
-('嚙','[嚙囓]'),
-('莨','[茛莨]'),
-('茛','[茛莨]'),
-('霉','[黴霉]'),
-('黴','[黴霉]'),
-('莓','[苺莓]'),  
-('苺','[苺莓]'),  
-('藥','[葯藥]'),  
-('葯','[葯藥]'),  
-('菫','[堇菫]'),
-('堇','[堇菫]')], 
-columns=['char','pattern'])
-var_df['idx'] = var_df.groupby(['pattern']).ngroup()
 
-var_df_2 = pd.DataFrame([('行鳥','(行鳥|鴴)'),
-('蝦虎','[鰕蝦]虎'),
-('鰕虎','[鰕蝦]虎'),
-('巫鳥','(鵐|巫鳥)'),
-('魚翁','(䱵|魚翁)'),
-('魚銜','(䲗|魚銜)'),
-('魚央','(䱀|魚央)'),
-('游蛇','[遊游]蛇'),
-('遊蛇','[遊游]蛇'),
-('即鳥','(䳭|即鳥)'),
-('椿象','[蝽椿]象'),
-('蝽象','[蝽椿]象')], columns=['char','pattern'])
+var_dict = requests.get("https://raw.githubusercontent.com/TaiBIF/tbia-portal/main/data/variants.json")
+var_dict = var_dict.json()
+
+comp_dict = requests.get("https://raw.githubusercontent.com/TaiBIF/tbia-portal/main/data/composites.json")
+comp_dict = comp_dict.json()
 
 
-def get_variants(string):
-  new_string = ''
-  # 單個異體字
-  for s in string:    
-    if len(var_df[var_df['char']==s]):
-      new_string += var_df[var_df['char']==s].pattern.values[0]
-    else:
-      new_string += s
-  # 兩個異體字
-  for i in var_df_2.index:
-    char = var_df_2.loc[i, 'char']
-    if char in new_string:
-      new_string = new_string.replace(char,f"{var_df_2.loc[i, 'pattern']}")
-  return new_string
+
+# 1. 異體字群組
+
+variant_groups: List[List[str]] = var_dict
+
+# 2. 會意字 ↔ 合成組合 映射
+composite_map: Dict[str, str] = comp_dict
+reverse_composite_map: Dict[str, str] = {v: k for k, v in composite_map.items()}
+
+# 3. 查詢某個字的異體群組
+def get_word_variants(char: str) -> List[str]:
+    for group in variant_groups:
+        if char in group:
+            return group
+    return [char]
+
+# 4. 對一串文字生成正則 pattern，例如「台灣」→ [台臺]灣
+def generate_pattern_from_word(word: str) -> str:
+    return ''.join(
+        f"[{''.join(get_word_variants(c))}]" if len(get_word_variants(c)) > 1 else c
+        for c in word
+    )
+
+# 5. 主處理函式：將輸入文字轉換為包含異體字與會意字 pattern 的版本
+def process_text_variants(text: str) -> str:
+    result = ''
+    i = 0
+    while i < len(text):
+        matched = False
+        # 處理會意字組合：優先處理最長的詞組
+        for composite, composed in composite_map.items():
+            if text.startswith(composite, i):
+                pattern = f"({composite}|{generate_pattern_from_word(composed)})"
+                result += pattern
+                i += len(composite)
+                matched = True
+                break
+            elif text.startswith(composed, i):
+                pattern = f"({composite}|{generate_pattern_from_word(composed)})"
+                result += pattern
+                i += len(composed)
+                matched = True
+                break
+        if not matched:
+            char = text[i]
+            variants = get_word_variants(char)
+            if len(variants) > 1:
+                result += f"[{''.join(variants)}]"
+            else:
+                result += char
+            i += 1
+    return result
+
+
+# def get_variants(string):
+#   new_string = ''
+#   # 單個異體字
+#   for s in string:    
+#     if len(var_df[var_df['char']==s]):
+#       new_string += var_df[var_df['char']==s].pattern.values[0]
+#     else:
+#       new_string += s
+#   # 兩個異體字
+#   for i in var_df_2.index:
+#     char = var_df_2.loc[i, 'char']
+#     if char in new_string:
+#       new_string = new_string.replace(char,f"{var_df_2.loc[i, 'pattern']}")
+#   return new_string
 
 spe_chars = ['+','-', '&','&&', '||', '!','(', ')', '{', '}', '[', ']', '^', '"', '~', '*', '?', ':', '/', '.']
 
@@ -327,16 +228,16 @@ def get_conditioned_solr_search(req):
 
     if keyword := req.get('scientific_name','').strip():
         keyword_wo_rank = remove_rank_char(keyword)
-        keyword_wo_rank = get_variants(keyword_wo_rank)
+        keyword_wo_rank = process_text_variants(keyword_wo_rank)
 
         keyword = escape_solr_query(keyword)
-        keyword = get_variants(keyword)
+        keyword = process_text_variants(keyword)
         # name_query_list.append('search_name:/{}/'.format(keyword))
         name_query_list.append(f"search_name:/{keyword}/ OR search_name_wo_rank:/{keyword_wo_rank}/")
 
     if common_name_keyword := req.get('common_name','').strip():
 
-        common_name_keyword = get_variants(common_name_keyword)
+        common_name_keyword = process_text_variants(common_name_keyword)
         name_query_list.append('search_name:/{}/'.format(common_name_keyword))
         name_query_list.append('-taxon_name_id:*')
 
@@ -467,7 +368,7 @@ def get_conditioned_solr_search(req):
                     LEFT JOIN api_common_name acn ON acn.taxon_id = t.taxon_id  
                     WHERE (tn.name = %s OR acn.name_c REGEXP %s) AND t.is_deleted = 0 """
         with conn.cursor() as cursor:
-            cursor.execute(query_1, (taxon_group, get_variants(taxon_group)))
+            cursor.execute(query_1, (taxon_group, process_text_variants(taxon_group)))
             t_id = cursor.fetchall()           
             if len(t_id):
                 # 可能不只一筆
