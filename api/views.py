@@ -588,7 +588,7 @@ class ReferencesView(APIView):
                 df['reference_order'] = df['reference_type'].apply(lambda x: custom_reference_type_order[x])
                 df = df.sort_values('publish_year', ascending=False).sort_values('reference_order')
                 df.loc[df.reference_type.isin([4,6]), 'reference_id'] = None
-                df.loc[df.reference_typ.isin([4,6]), 'publish_year'] = None
+                df.loc[df.reference_type.isin([4,6]), 'publish_year'] = None
                 df.loc[df.reference_type.isin([4,6]), 'citation'] = 'TaiCOL Backbone'
                 df['reference_type'] = df['reference_type'].apply(lambda x: reference_type_map[x] if x else None)
                 df['publish_year'] = df['publish_year'].fillna(0).astype(int).replace({0: None})
