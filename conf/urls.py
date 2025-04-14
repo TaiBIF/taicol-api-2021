@@ -37,8 +37,7 @@ schema_view = get_schema_view(
 )
 
 
-urlpatterns = [
-    path('admin/', admin.site.urls),
+api_patterns = [    
     path('name', api_view.NameView.as_view()),
     path('taxon', api_view.TaxonView.as_view()),
     path('higherTaxa', api_view.HigherTaxaView.as_view()),
@@ -46,6 +45,12 @@ urlpatterns = [
     path('nameMatch', api_view.NameMatchView.as_view()),
     path('namecode', api_view.NamecodeView.as_view()),
     path('taxonVersion', api_view.TaxonVersionView.as_view()),
+]
+
+urlpatterns = [
+    path('admin/', admin.site.urls),
+    path('v2/', include(api_patterns)),  # 有 /v2/ 的版本
+    path('', include(api_patterns)),    # 沒有 /v2/ 的版本
     re_path(r'^swagger(?P<format>\.json|\.yaml)$', schema_view.without_ui(cache_timeout=0), name='schema-json'),
     re_path(r'^swagger/$', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
     re_path(r'^redoc/$', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),

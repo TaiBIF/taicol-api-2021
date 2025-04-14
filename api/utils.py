@@ -117,8 +117,6 @@ var_dict = var_dict.json()
 comp_dict = requests.get("https://raw.githubusercontent.com/TaiBIF/tbia-portal/main/data/composites.json")
 comp_dict = comp_dict.json()
 
-
-
 # 1. 異體字群組
 
 variant_groups: List[List[str]] = var_dict
