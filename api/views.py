@@ -1301,11 +1301,13 @@ def update_check_usage(request):
         # 只接受從工具傳來的request
         # 用ip來判斷
         ALLOWED_HOST_FOR_USAGE_CHECK = env.list('ALLOWED_HOST_FOR_USAGE_CHECK')
-        if request.META.get('HTTP_X_FORWARDED_FOR') in ALLOWED_HOST_FOR_USAGE_CHECK:
-            a = check_taxon_usage()
-            response = {"status": {"code": 200, "message": "Usage checked!"}}
-        else:
-            response = {"status": {"code": 403, "message": "Forbidden"}}
+        for host in ALLOWED_HOST_FOR_USAGE_CHECK:
+            if host in request.META.get('HTTP_X_FORWARDED_FOR'):
+                a = check_taxon_usage()
+                response = {"status": {"code": 200, "message": "Usage checked!"}}
+                break
+            else:
+                response = {"status": {"code": 403, "message": "Forbidden"}}
 
     except Exception as er:
         print(er)
