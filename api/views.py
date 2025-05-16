@@ -20,7 +20,24 @@ from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 
 from api.utils import *
+from api.utils_for_usage import *
 import requests
+from django.views.decorators.csrf import csrf_exempt
+from sqlalchemy import create_engine
+
+
+def safe_json_dumps(x):
+    if x is None or (not isinstance(x, (dict, list)) and pd.isna(x)):
+        return None
+    try:
+        return json.dumps(
+            x,
+            default=lambda o: o.item() if hasattr(o, 'item') else str(o)
+        )
+    except Exception as e:
+        print(f"JSON 轉換失敗：{x}，錯誤：{e}")
+        return None
+
 
 db_settings = {
     "host": env('DB_HOST'),
@@ -1315,3 +1332,1149 @@ def update_check_usage(request):
 
     return HttpResponse(json.dumps(response))
 
+
+# 給工具使用的API
+def get_taxon_by_higher(request):
+
+    only_in_taiwan = request.GET.get('only_in_taiwan')
+    exclude_cultured = request.GET.get('exclude_cultured')
+    
+    # 因為已經有限定是最高上階層是科 所以底下的不用再限定
+    higher_taxa = request.GET.get('higher_taxa','')
+    higher_taxa = higher_taxa.split(',')
+
+
+    query_list = []
+    query_list.append('is_deleted:false')
+
+    if only_in_taiwan == 'yes':
+        query_list.append('is_in_taiwan:true')
+
+    if exclude_cultured == 'yes':
+        query_list.append('-alien_type:cultured')
+
+    # higher_taxa = request.GET.getlist('higher_taxa')
+    
+    query_list.append('path:({})'.format((' OR ').join([f'/.*{f}.*/' for f in higher_taxa])))
+
+    # print(query_list)
+
+    query = { "query": "*:*",
+        # "offset": offset,
+        "limit": 0,
+        "filter": query_list,
+        # "sort": 'search_name asc',
+        "facet": {"taxon_id": {
+                        'type': 'terms',
+                        'field': 'taxon_id',
+                        'mincount': 1,
+                        'limit': -1,
+                        'offset': 0,
+                        'allBuckets': False,
+                        'numBuckets': False
+                  }}
+    }
+
+    query_req = json.dumps(query)
+
+    resp = requests.post(f'{SOLR_PREFIX}taxa/select?', data=query_req, headers={'content-type': "application/json" })
+    resp = resp.json()
+    taxon_ids = [r['val'] for r in resp['facets']['taxon_id']['buckets']] if resp['facets'].get('count') else []
+
+
+    return HttpResponse(json.dumps(taxon_ids), content_type='application/json')
+
+    # 回傳path包含higher_taxa的所有taxon_id 
+
+
+
+
+@csrf_exempt
+def generate_checklist(request):
+
+    data = json.loads(request.body)
+    pairs = list({(item['reference_id'], item['group']) for item in data})
+    # print(pairs)
+    
+    # pairs = [(153, 5822), (100, 9123), (153, 42197), (100, 8732), (153, 7026), (153, 1275), (2454, 1307), (153, 192), (2454, 1316), (1018, 271), (2454, 1325), (1854, 543), (99, 1), (1018, 280), (2454, 1334), (2454, 1343), (330, 1), (153, 5570), (100, 2455), (100, 9118), (100, 9127), (153, 36679), (100, 7406), (2454, 1311), (1018, 266), (100, 3070), (2454, 1320), (153, 7524), (2454, 1329), (100, 4656), (333, 1), (100, 2450), (100, 9122), (813, 4021), (100, 729), (153, 42196), (153, 5942), (2454, 1306), (153, 35645), (153, 191), (2454, 1315), (2454, 1324), (100, 3083), (153, 5551), (100, 2930), (153, 4095), (153, 5290), (2454, 1310), (1019, 315), (1019, 324), (153, 7626), (153, 5249), (3319, 265), (3319, 274), (153, 190), (153, 4202), (153, 3546), (153, 5788), (1019, 310), (1019, 319), (1019, 328), (3319, 260), (3319, 269), (1019, 305), (1019, 314), (1019, 323), (153, 6295), (153, 4098), (3319, 246), (3319, 255), (3319, 264), (3319, 273), (337, 1), (328, 10), (2454, 1371), (1019, 300), (1019, 309), (1019, 318), (100, 8926), (100, 524), (153, 5234), (3319, 241), (100, 560), (3319, 250), (3319, 259), (3319, 268), (153, 6402), (1854, 557), (153, 4205), (2454, 1357), (328, 5), (2454, 1366), (1019, 304), (1019, 313), (3319, 236), (3319, 245), (100, 3911), (3319, 254), (3319, 263), (1854, 552), (153, 36765), (1018, 289), (1854, 561), (2454, 1352), (2454, 1361), (153, 246), (328, 9), (2454, 1370), (153, 4694), (153, 5359), (1019, 299), (100, 6265), (100, 523), (3319, 231), (3319, 240), (153, 385), (3319, 249), (1854, 538), (1018, 275), (1854, 547), (1018, 284), (153, 6639), (2454, 1338), (1854, 556), (1018, 293), (2454, 1347), (2454, 1356), (328, 4), (2454, 1365), (153, 4280), (100, 8484), (153, 2748), (100, 8731), (153, 42232), (153, 6778), (100, 2342), (3319, 235), (153, 1274), (3319, 244), (1018, 270), (1854, 542), (1018, 279), (2454, 1333), (1854, 551), (1018, 288), (2454, 1342), (1854, 560), (2454, 1351), (2454, 1360), (328, 8), (2454, 1369), (100, 9117), (100, 9126), (153, 7429), (3319, 230), (1018, 265), (2454, 1319), (1854, 537), (153, 5964), (1018, 274), (2454, 1328), (1854, 546), (100, 6385), (1018, 283), (2454, 1337), (1854, 555), (1018, 292), (2454, 1346), (2454, 1355), (100, 2449), (100, 9121), (153, 35950), (153, 4279), (334, 1), (153, 42195), (153, 1273), (2454, 1305), (2454, 1314), (335, 1), (1018, 269), (2454, 1323), (1854, 541), (100, 6380), (1018, 278), (2454, 1332), (1018, 287), (129, 9), (2454, 1341), (100, 2453), (100, 9125), (406, 2), (100, 8972), (2454, 1309), (1018, 264), (2454, 1318), (1018, 273), (2454, 1327), (153, 39440), (2454, 1336), (153, 6219), (100, 2448), (153, 39058), (153, 2710), (153, 41947), (153, 4278), (153, 5190), (153, 2139), (2454, 1313), (153, 3078), (1018, 268), (2454, 1322), (129, 8), (1019, 327), (153, 7638), (153, 6326), (406, 1), (100, 8971), (2454, 1308), (153, 193), (2454, 1317), (330, 2), (1019, 322), (100, 4262), (153, 35768), (153, 1217), (153, 4097), (100, 1638), (153, 7489), (3319, 272), (153, 6604), (1019, 308), (1019, 326), (100, 8925), (153, 35848), (3319, 258), (3319, 267), (100, 586), (153, 4204), (153, 39258), (1019, 303), (153, 38373), (1019, 312), (1019, 321), (153, 4096), (3319, 253), (3319, 262), (3319, 271), (153, 41877), (100, 6197), (1019, 298), (1019, 307), (100, 5370), (1019, 316), (1019, 325), (100, 8924), (153, 36000), (153, 6306), (153, 35582), (153, 2123), (3319, 239), (3319, 248), (3319, 257), (153, 35856), (3319, 266), (3319, 275), (153, 4203), (153, 3547), (328, 3), (2454, 1364), (1019, 302), (153, 35730), (1019, 311), (1019, 320), (153, 35986), (153, 35995), (153, 42231), (3319, 234), (153, 7460), (3319, 243), (153, 5245), (3846, 7), (3319, 252), (153, 37401), (3319, 261), (3319, 270), (1854, 550), (1854, 559), (1018, 296), (2454, 1350), (2454, 1359), (328, 7), (2454, 1368), (309, 3), (153, 4036), (1019, 297), (153, 5604), (100, 2907), (153, 936), (1019, 306), (3319, 238), (336, 1), (153, 1277), (3319, 247), (3319, 256), (1854, 545), (1018, 282), (153, 42091), (1854, 554), (153, 35675), (1018, 291), (2454, 1345), (2454, 1354), (328, 2), (2454, 1363), (2454, 1372), (153, 35949), (100, 6011), (153, 35958), (1019, 301), (3319, 233), (3319, 242), (3319, 251), (1854, 540), (1018, 277), (2454, 1331), (1854, 549), (2454, 1340), (1854, 558), (1018, 295), (2454, 1349), (2454, 1358), (153, 7562), (100, 2452), (328, 6), (2454, 1367), (309, 2), (100, 9124), (153, 7153), (19, 1), (100, 8733), (100, 5453), (3319, 237), (153, 1276), (153, 1523), (2454, 1326), (1854, 544), (1018, 281), (153, 42090), (2454, 1335), (1854, 553), (1018, 290), (2454, 1344), (2454, 1353), (328, 1), (2454, 1362), (153, 2709), (153, 35948), (153, 4277), (153, 35786), (100, 7407), (153, 4133), (3319, 232), (2454, 1312), (1018, 267), (2454, 1321), (1854, 539), (1018, 276), (2454, 1330), (1854, 548), (1018, 285), (2454, 1339), (1018, 294), (2454, 1348), (153, 6896), (100, 2451), (331, 1)]
+    use_common_name_backbone = True if len([p for p in pairs if p[0] == 95]) else False
+
+
+    conn = pymysql.connect(**db_settings)
+
+
+    # # 最後一筆學名使用更新的時間當成last_updated
+    # # 這邊應該也要考慮刪除的時間 ?
+    query = '''SELECT max(updated_at) FROM reference_usages ru 
+                WHERE ru.is_title != 1 AND ru.status NOT IN ("", "undetermined") 
+                AND ru.deleted_at IS NULL 
+                AND ru.accepted_taxon_name_id IS NOT NULL
+                UNION ALL
+                SELECT max(deleted_at) FROM reference_usages  WHERE deleted_at IS NOT NULL
+                '''
+
+    with conn.cursor() as cursor:
+        execute_line = cursor.execute(query)
+        last_updateds = cursor.fetchall()
+        last_updateds = [l[0] for l in last_updateds]
+        last_updated = max(last_updateds)
+
+
+    # 只先處理需要刪除的usage
+
+    query = '''select id, reference_id, taxon_name_id from reference_usages where (taxon_name_id in (SELECT id FROM taxon_names WHERE deleted_at IS NOT NULL) or 
+                                                    accepted_taxon_name_id in (SELECT id FROM taxon_names WHERE deleted_at IS NOT NULL) or 
+                                                    reference_id in (select id from `references` WHERE deleted_at IS NOT NULL)) 
+                                                    and deleted_at is null;'''
+    with conn.cursor() as cursor:
+        execute_line = cursor.execute(query)
+        deleted_ids = cursor.fetchall()
+        deleted_ru_ids = [i[0] for i in deleted_ids]
+
+    if len(deleted_ru_ids):
+        query = """UPDATE reference_usages SET deleted_at = %s WHERE id IN %s"""
+        with conn.cursor() as cursor:
+            execute_line = cursor.execute(query, (last_updated, deleted_ru_ids))
+            conn.commit()
+        # 新增到import_usage_log
+        for ddd in deleted_ids:
+            query = """
+            INSERT INTO `import_usage_logs` (`reference_id`, `action`, `user_id`, `reference_usage_id`, `taxon_name_id`)
+            VALUES (%s, 5, 5, %s, %s);"""
+            with conn.cursor() as cursor:
+                execute_line = cursor.execute(query, (ddd[1], ddd[0], ddd[2]))
+                conn.commit()
+
+
+    conn = pymysql.connect(**db_settings)
+
+    #NOTE 用reference_id + group去抓資料
+    
+    placeholders = ",".join(["(%s, %s)"] * len(pairs))
+    params = [item for pair in pairs for item in pair]
+
+    query = f'''
+            SELECT ru.id, ru.reference_id, ru.taxon_name_id, ru.accepted_taxon_name_id, ru.status, 
+                r.properties ->> '$.check_list_type', ru.per_usages, r.publish_year, 
+                ru.properties ->> '$.is_in_taiwan', atu.taxon_id, ru.parent_taxon_name_id, ru.`group`,
+                tn.rank_id, tn.original_taxon_name_id, tn.name,
+                tn.properties ->> '$.latin_genus', tn.properties ->> '$.latin_s1', 
+                tn.properties ->> '$.species_layers', JSON_LENGTH(tn.properties ->> '$.species_layers'),
+                tn.nomenclature_id, tn.properties ->> '$.is_hybrid', 
+                tn.object_group, tn.autonym_group
+                FROM reference_usages ru 
+                JOIN `references` r ON r.id = ru.reference_id
+                JOIN taxon_names tn ON tn.id = ru.taxon_name_id
+                LEFT JOIN api_taxon_usages atu ON atu.is_deleted = 0 and atu.reference_id = ru.reference_id and atu.accepted_taxon_name_id = ru.accepted_taxon_name_id and atu.taxon_name_id = ru.taxon_name_id
+                WHERE ru.is_title != 1 AND ru.status NOT IN ("", "undetermined") AND ru.deleted_at IS NULL AND ru.accepted_taxon_name_id IS NOT NULL AND (ru.reference_id, ru.`group`) IN ({placeholders})
+            '''
+
+    with conn.cursor() as cursor:
+        execute_line = cursor.execute(query, params)
+        tmp = cursor.fetchall()
+        ref_group_pair_total = pd.DataFrame(tmp, columns=['ru_id','reference_id','taxon_name_id','accepted_taxon_name_id', 
+                                                        'ru_status', 'check_list_type', 'per_usages','publish_year', 
+                                                        'is_in_taiwan','taxon_id','parent_taxon_name_id','group',
+                                                        'rank_id', 'original_taxon_name_id', 'name', 
+                                                        'latin_genus', 'latin_s1', 'species_layers', 'layer_count', 
+                                                        'nomenclature_id','is_hybrid',
+                                                        'object_group', 'autonym_group'
+                                                        ])
+        # 排除俗名backbone
+        ref_group_pair_total = ref_group_pair_total[ref_group_pair_total.reference_id!=95]
+        ref_group_pair_total = ref_group_pair_total[ref_group_pair_total.check_list_type != 4] # !=4 寫在query裡會排除掉null
+        ref_group_pair_total = ref_group_pair_total.drop_duplicates()
+        ref_group_pair_total = ref_group_pair_total.reset_index(drop=True)
+        ref_group_pair_total = ref_group_pair_total.replace({np.nan:None})
+
+    # TODO 這邊要補抓per_usage中的reference or 不用?
+    
+    name_df = ref_group_pair_total[['taxon_name_id', 'rank_id', 'original_taxon_name_id', 'name', 
+                                            'latin_genus', 'latin_s1', 'species_layers', 'layer_count', 
+                                            'nomenclature_id','is_hybrid',
+                                            'object_group', 'autonym_group']].drop_duplicates()
+    name_df = name_df.reset_index(drop=True)
+    name_df = name_df.replace({np.nan:None})
+
+    query = '''SELECT r.id, r.publish_year, JSON_EXTRACT(r.properties, "$.doi"), r.`type`, ac.publish_date
+                FROM `references` r 
+                LEFT JOIN api_citations ac ON ac.reference_id = r.id
+                WHERE r.is_publish = 1 AND r.id IN %s
+                '''
+
+    with conn.cursor() as cursor:
+        execute_line = cursor.execute(query, (list(ref_group_pair_total.reference_id.unique()),))
+        refs = cursor.fetchall()
+        refs = pd.DataFrame(refs)
+        refs = refs.rename(columns={0: 'reference_id', 1: 'publish_year', 2: 'doi', 3: 'type', 4: 'publish_date'})
+
+    refs = refs.replace({np.nan:None})
+    refs['publish_date'] = refs['publish_date'].replace({None:''})
+    refs['publish_year'] = refs['publish_year'].apply(int)
+
+
+    # 欄位順序
+    ref_group_pair_total = ref_group_pair_total[['ru_id','reference_id','taxon_name_id','accepted_taxon_name_id',
+                                                    'rank_id','ru_status','original_taxon_name_id','latin_genus','latin_s1',
+                                                    'species_layers','layer_count','check_list_type',
+                                                    'per_usages','publish_year','is_in_taiwan','nomenclature_id','taxon_id',
+                                                    'object_group', 'autonym_group','parent_taxon_name_id','group']]
+    ref_group_pair_total = ref_group_pair_total.replace({np.nan:None})
+
+    ref_group_pair_total['publish_year'] = ref_group_pair_total['publish_year'].apply(int)
+
+    # NOTE 不檢查資料
+
+    # 加入誤用的per_usages
+    # 這邊應該要處理全部才對 後面加的時候才不會漏掉
+    misapplied_accepted_taxon_name_id = ref_group_pair_total[ref_group_pair_total.ru_status=='misapplied'].accepted_taxon_name_id.unique()
+    len(misapplied_accepted_taxon_name_id)
+
+    # 在分類學中，"pro parte"意思是"部分地" 是一個用來描述分類單元或文獻引用的術語，表示某一名稱或描述只適用於特定的一部分，而不是全部。
+
+    # c = 0
+    for mm in misapplied_accepted_taxon_name_id: # 1184
+        # c += 1
+        # if c % 100 == 0:
+        #     print('now', c)
+        rows = ref_group_pair_total[(ref_group_pair_total.accepted_taxon_name_id==mm)&(ref_group_pair_total.ru_status=='misapplied')].to_dict('records')
+        # 先處理一般的情況 只要有在per_usages中 就全部併入
+        for row in rows: # row代表 誤用名的誤用學名使用
+            usage = json.loads(row.get('per_usages'))
+            current_name_id = row.get('taxon_name_id')
+            accepted_taxon_name_id = row.get('accepted_taxon_name_id')
+            # reference_id = row.get('reference_id')
+            # 原則: 只併入misapplied的本身 其他底下的usage不收錄
+            # 先處理從usage去抓
+            is_pro_parte = False
+            for uu in usage:
+                if uu.get('pro_parte') == True:
+                    is_pro_parte = True
+                # # 相同引用
+                # if refs[refs.reference_id==uu.get('reference_id')].publish_year.values[0] > row['publish_year']:
+                #     # NOTE 這邊應該是錯誤的 理論上per_usages中的要是比較舊的文獻才對
+                #     print('mm', mm, 'uu', uu)
+                #     pass
+                # else:
+                # 誤用名本身的接受學名使用
+                # 先修改 ref_group_pair_total
+                now_ru_id = []
+                if len(ref_group_pair_total[(ref_group_pair_total.reference_id==uu.get('reference_id'))&(ref_group_pair_total.accepted_taxon_name_id==current_name_id)]):
+                    # 只併入有效 / 誤用的學名使用  其他無效名移除
+                    ref_group_pair_total = ref_group_pair_total[~((ref_group_pair_total.reference_id==uu.get('reference_id'))&(ref_group_pair_total.accepted_taxon_name_id==current_name_id)&(ref_group_pair_total.ru_status=='not-accepted'))]
+                    # NOTE 在這步先修改accepted_taxon_name_id 以便後面的分組 但最後存資料庫的時候要改回來 以後對資料才對得起來
+                    # 用ru_id比較不會出錯 因為會去修改usage的status & accepted name (now_ru_id = 誤用名的接受學名使用)
+                    # 這邊的now_ru_id應該要變成list才對 因為有可能是有效 or 誤用
+                    now_ru_id = ref_group_pair_total[(ref_group_pair_total.reference_id==uu.get('reference_id'))&(ref_group_pair_total.accepted_taxon_name_id==current_name_id)].ru_id.to_list()
+                    # NOTE 2024-12-21 reference_id 也修改 反正是在年代之後 不然後面會有影響
+                    ref_group_pair_total.loc[ref_group_pair_total.ru_id.isin(now_ru_id), 'ru_status'] = 'misapplied'
+                    ref_group_pair_total.loc[ref_group_pair_total.ru_id.isin(now_ru_id), 'accepted_taxon_name_id'] = accepted_taxon_name_id
+                    ref_group_pair_total.loc[ref_group_pair_total.ru_id.isin(now_ru_id), 'reference_id'] = row.get('reference_id')
+            # 找出 *誤用學名的對應有效學名使用* 的 is_in_taiwan 以下跟per_usage無關
+            if not is_pro_parte:
+                if len(ref_group_pair_total[(ref_group_pair_total.accepted_taxon_name_id==row.get('accepted_taxon_name_id'))&(ref_group_pair_total.reference_id==row.get('reference_id'))&(ref_group_pair_total.ru_status=='accepted')]):
+                    current_is_in_taiwan = ref_group_pair_total[(ref_group_pair_total.accepted_taxon_name_id==row.get('accepted_taxon_name_id'))&(ref_group_pair_total.reference_id==row.get('reference_id'))&(ref_group_pair_total.ru_status=='accepted')].is_in_taiwan.values[0]
+                    # 如果is_in_taiwan = 1 即使per_usages中沒有提到該文獻 只要也將誤用名設為有效 且文獻較舊 則一樣納入
+                    # TODO 如果有 pro parte 這邊就不併入較早的文獻
+                    if current_is_in_taiwan == '1':
+                        publish_year = row.get('publish_year')
+                        # 需要判斷年份的順序 & is_in_taiwan = 1
+                        # 如果有對應的 tmp_taxon_id 改成相同的 tmp_taxon_id 並將地位改為誤用
+                        if len(ref_group_pair_total[(ref_group_pair_total.accepted_taxon_name_id==current_name_id)&(ref_group_pair_total.is_in_taiwan=='1')&(ref_group_pair_total.publish_year<publish_year)]):
+                            merging_refs = ref_group_pair_total[(ref_group_pair_total.ru_status=='accepted')&(ref_group_pair_total.accepted_taxon_name_id==current_name_id)&(ref_group_pair_total.is_in_taiwan=='1')&(ref_group_pair_total.publish_year<publish_year)].reference_id.unique()
+                            for mr in merging_refs:
+                                # 只併入有效&誤用的學名使用 其他無效名移除
+                                ref_group_pair_total = ref_group_pair_total[~((ref_group_pair_total.reference_id==mr)&(ref_group_pair_total.accepted_taxon_name_id==current_name_id)&(ref_group_pair_total.ru_status=='not-accepted'))]
+                                # results = results[~((results.reference_id==mr)&(results.accepted_taxon_name_id==current_name_id)&(results.ru_status=='not-accepted'))]
+                                # NOTE 在這步先修改accepted_taxon_name_id 以便後面的分組 但最後存資料庫的時候要改回來 以後對資料才對得起來
+                                # 用ru_id比較不會出錯 因為會去修改usage的status & accepted name (now_ru_id = 誤用名的接受學名使用)
+                                # 這邊的now_ru_id應該要變成list才對 因為有可能是有效 or 誤用
+                                now_ru_id = ref_group_pair_total[(ref_group_pair_total.reference_id==mr)&(ref_group_pair_total.accepted_taxon_name_id==current_name_id)].ru_id.to_list()
+                                ref_group_pair_total.loc[ref_group_pair_total.ru_id.isin(now_ru_id), 'ru_status'] = 'misapplied'
+                                ref_group_pair_total.loc[ref_group_pair_total.ru_id.isin(now_ru_id), 'accepted_taxon_name_id'] = accepted_taxon_name_id
+                                ref_group_pair_total.loc[ref_group_pair_total.ru_id.isin(now_ru_id), 'reference_id'] = row.get('reference_id')
+
+
+
+    results = ref_group_pair_total
+    results = results.drop(columns=['check_list_type','taxon_id'])
+
+    # 排除俗名backbone (前面的步驟應該已經將對應的taxon_name_id usage抓進來了)
+    results = results[results.reference_id!=95]
+    # 從 stauts=accepted 的 進行名錄更新流程
+    results = results[results.ru_status=='accepted']
+    results = results.drop_duplicates()
+    results = results.replace({np.nan:None})
+    results = results.reset_index(drop=True)
+    results = results.sort_values('rank_id').reset_index(drop=True)
+
+
+    count = 0
+    total_df = pd.DataFrame(columns=['ru_id','reference_id','accepted_taxon_name_id'])
+
+    ref_group_pair_total_obj = ref_group_pair_total[(ref_group_pair_total.object_group.notnull())&(ref_group_pair_total.ru_status=='accepted')][['reference_id','accepted_taxon_name_id','object_group']].drop_duplicates()
+    ref_group_pair_total_misapplied = ref_group_pair_total[ref_group_pair_total.ru_status=='misapplied'][['reference_id','accepted_taxon_name_id','taxon_name_id']].drop_duplicates()
+
+    for i in results.index: # 33155
+        row = results.iloc[i]
+        if row.ru_id not in total_df.ru_id.to_list():
+            new_names = [row.taxon_name_id]
+            name_list = [row.taxon_name_id]
+            df = pd.DataFrame(columns=['reference_id','accepted_taxon_name_id'])
+            # 取得相關學名
+            while len(new_names) > 0:
+                for nn in new_names:
+                    if nn in new_names:
+                        object_group = name_df[name_df.taxon_name_id==nn].object_group.values[0]
+                        new_names, df, name_list = get_related_names(taxon_name_id=nn, df=df, new_names=new_names, name_list=name_list, 
+                                                                    ref_group_pair_now=ref_group_pair_total, 
+                                                                    object_group=object_group, 
+                                                                    ref_group_pair_now_obj=ref_group_pair_total_obj, 
+                                                                    ref_group_pair_now_misapplied=ref_group_pair_total_misapplied)
+                    if not new_names:
+                        break
+            # 排除掉related_name中 status是misapplied的name
+            df = df.drop_duplicates().reset_index(drop=True)
+            df = df.merge(ref_group_pair_total[['ru_id','reference_id','accepted_taxon_name_id','taxon_name_id']])
+            # return回來再merge ref_group_pair
+            # 如果ref & group已存在在其他tmp_taxon_id，則納入該tmp_taxon_id分類群 
+            if len(df):
+                check_if_taxon_id = pd.DataFrame()
+                if len(total_df):
+                    check_if_taxon_id = total_df.merge(df)
+                if len(check_if_taxon_id):
+                    if len(check_if_taxon_id.tmp_taxon_id.unique()) == 1:
+                        df['tmp_taxon_id'] = check_if_taxon_id.tmp_taxon_id.unique()[0]
+                    else:
+                        # 把全部都改成同一個tmp_taxon_id
+                        tmp_taxon_id = check_if_taxon_id.tmp_taxon_id.unique()[0]
+                        total_df.loc[total_df.ru_id.isin(check_if_taxon_id.ru_id.to_list()),'tmp_taxon_id'] = tmp_taxon_id
+                        df['tmp_taxon_id'] = tmp_taxon_id
+                else:
+                    count += 1
+                    tmp_taxon_id = count
+                    df['tmp_taxon_id'] = tmp_taxon_id
+                total_df = pd.concat([total_df,df], ignore_index=True)
+                total_df = total_df.drop_duplicates()
+
+
+    total_df = total_df[['reference_id', 'accepted_taxon_name_id','ru_id', 'taxon_name_id', 'tmp_taxon_id']].merge(ref_group_pair_total)
+
+    # 應該不會有新的學名使用需要加入 因為已經用整個usage去跑
+
+    total_df = total_df.drop_duplicates()
+
+    # 判斷分群中誰為最新
+    # 取最新接受名，其他為同物異名或誤用名
+    # reference_id, group, taxon_name_id
+    # 抓status, publish_year
+
+    total_df = total_df.merge(refs[['reference_id','type','doi','publish_date']])
+
+
+    # 決定誰是接受學名
+    taxon_list = total_df.tmp_taxon_id.unique()
+    len(taxon_list) 
+
+    total_df['is_latest'] = False
+    conn = pymysql.connect(**db_settings)
+
+    cannot_decide = []
+    for t in taxon_list:  # 11925
+        temp = total_df[(total_df.tmp_taxon_id==t)&(total_df.ru_status=='accepted')]
+        latest_ru_id_list = check_latest(temp=temp, conn=conn)
+        if not len(latest_ru_id_list):
+            cannot_decide.append(t)
+        else:
+            total_df.loc[total_df.tmp_taxon_id==t, 'is_latest'] = False
+            total_df.loc[total_df.ru_id.isin(latest_ru_id_list), 'is_latest'] = True
+
+    # 分類觀檢查
+
+
+
+    # 2 同模異名檢查
+    # TODO 這邊的白名單改用資料庫抓
+
+    whitelist_list_1, whitelist_list_2, whitelist_list_3 = get_whitelist(conn)
+
+    check_obj = total_df[(total_df.ru_status!='misapplied')&(~total_df.ru_id.isin(whitelist_list_1))][['object_group','tmp_taxon_id']].drop_duplicates().groupby(['object_group'], as_index=False).count()
+    check_obj_list = check_obj[check_obj.tmp_taxon_id>1].object_group.unique()
+    # len(check_obj_list) # 597
+
+    reset_is_latest_list = []
+    cannot_decide = []
+
+    # c = 0
+    for ooo in check_obj_list: # 7100,5341 / 7645, 5036
+        # c += 1
+        # if c % 100 == 0:
+        #     print(c)
+        # 改用同模本身的usage判斷
+        # 所有的同模式學名之學名使用，應併入文獻優先的學名使用對應的有效學名的分類群。
+        # 整群併入 (accepted_name_id + reference_id相同的) 但要是同模accepted_name_id
+        temp = total_df[(total_df.object_group==ooo)&(total_df.ru_status!='misapplied')]
+        # ≈ = temp[temp.ru_status=='accepted'] # 同模的accepted usages
+        rows = total_df[total_df.tmp_taxon_id.isin(temp.tmp_taxon_id.unique())]
+        newest_ru_id_list = check_status_latest(temp=temp, conn=conn)
+        reset_is_latest_list += list(temp.tmp_taxon_id.unique())
+        if len(total_df[total_df.ru_id.isin(newest_ru_id_list)].tmp_taxon_id.unique()) == 1:
+            # 併入的tmp_taxon_id
+            merging_tmp_taxon_id = temp[temp.ru_id.isin(newest_ru_id_list)].tmp_taxon_id.values[0]
+            # 所有同模accepted usages都併入同一個tmp_taxon_id 不管地位
+            merging_pairs = temp[(temp.ru_status=='accepted')&(temp.tmp_taxon_id!=merging_tmp_taxon_id)][['accepted_taxon_name_id','reference_id']].drop_duplicates().to_dict('records')
+            merging_ru_ids = temp.ru_id.to_list() # 這邊就會包含單純的無效名 (接受名非同模)
+            for mm in merging_pairs: # 這邊會包含如果同模異名是accepted 併入整個無效名
+                merging_ru_ids += rows[(rows.accepted_taxon_name_id==mm.get('accepted_taxon_name_id'))&(rows.reference_id==mm.get('reference_id'))].ru_id.to_list()
+            total_df.loc[total_df.ru_id.isin(merging_ru_ids),'tmp_taxon_id'] = merging_tmp_taxon_id
+        # else:
+        #     cannot_decide.append({'object_group': ooo, 'ru_id': temp[['ru_id', 'rank_id','reference_id', 'taxon_name_id', 'accepted_taxon_name_id', 'original_taxon_name_id', 'tmp_taxon_id']]})
+
+
+    # # print(cannot_decide) 
+    # for cc in cannot_decide:
+    #     print('object_group', cc['object_group'])
+    #     print(cc['ru_id'].sort_values('tmp_taxon_id'))
+    # # 有可能會一直有cannot_decide的資料存在 同模異名若最新文獻是同一篇 代表兩個是獨立taxon
+
+
+    reset_is_latest_list = list(dict.fromkeys(reset_is_latest_list))
+
+    cannot_decide = []
+
+    # c = 0
+    for t in reset_is_latest_list: # 
+        # c+=1
+        # if c % 1000 == 0:
+        #     print(c)
+        temp = total_df[(total_df.tmp_taxon_id==t)&(total_df.ru_status=='accepted')]
+        if len(temp):
+            latest_ru_id_list = check_latest(temp=temp, conn=conn)
+            if not len(latest_ru_id_list):
+                cannot_decide.append(t)
+            else:
+                total_df.loc[total_df.tmp_taxon_id== t, 'is_latest'] = False
+                total_df.loc[total_df.ru_id.isin(latest_ru_id_list), 'is_latest'] = True
+
+
+    # 同學名 
+
+    check_status = total_df[(total_df.object_group.isnull())&(total_df.ru_status.isin(['accepted','not-accepted']))][['taxon_name_id','tmp_taxon_id']].drop_duplicates().groupby(['taxon_name_id'], as_index=False).count()
+    check_status_list = check_status[check_status.tmp_taxon_id>1].taxon_name_id.unique()
+    check_status_list = [cs for cs in check_status_list if cs not in whitelist_list_2]     
+
+    reset_is_latest_list = []
+
+    # 學名之間可能會互相影響 
+
+
+    has_more = True
+    while has_more:
+        for ccc in check_status_list:
+            # 用學名本身的usage判斷
+            temp = total_df[(total_df.taxon_name_id==ccc)&(total_df.ru_status!='misapplied')]
+            reset_is_latest_list += list(temp.tmp_taxon_id.unique())
+            newest_ru_id_list = check_status_latest(temp=temp, conn=conn)
+            if len(newest_ru_id_list) == 1:
+                newest_ru_id = newest_ru_id_list[0]
+                # 併入的tmp_taxon_id
+                merging_tmp_taxon_id = temp[temp.ru_id==newest_ru_id].tmp_taxon_id.values[0]
+                # 如果其他異名在另一個分類群為有效 整群併入
+                accepted_tmp_taxon_ids = temp[(temp.taxon_name_id==ccc)&(temp.is_latest==True)&(temp.ru_status=='accepted')].tmp_taxon_id.to_list()
+                total_df.loc[total_df.tmp_taxon_id.isin(accepted_tmp_taxon_ids),'tmp_taxon_id'] = merging_tmp_taxon_id
+                # 如果其他異名在另一個分類群為無效 只併入無效的該筆學名使用併入
+                not_accepted_ru_ids = temp[(temp.taxon_name_id==ccc)&~(temp.tmp_taxon_id.isin(accepted_tmp_taxon_ids)&(temp.ru_status=='not-accepted'))].ru_id.to_list()
+                total_df.loc[total_df.ru_id.isin(not_accepted_ru_ids),'tmp_taxon_id'] = merging_tmp_taxon_id
+            else:
+                cannot_decide.append(ccc)
+            # cannot_decide.append(ccc)
+        check_status = total_df[total_df.ru_status.isin(['accepted','not-accepted'])][['taxon_name_id','tmp_taxon_id']].drop_duplicates().groupby(['taxon_name_id'], as_index=False).count()
+        check_status_list = check_status[check_status.tmp_taxon_id>1].taxon_name_id.unique()
+        # 無法決定的就跳過
+        check_status_list = [cs for cs in check_status_list if cs not in whitelist_list_2 and cs not in cannot_decide]
+        # loop_count += 1
+        if not len(check_status_list):
+            has_more = False
+
+
+    # 若沒有把所有需要重新決定最新的分類群處理完 會造成後面有問題
+
+    reset_is_latest_list = list(dict.fromkeys(reset_is_latest_list))
+
+    cannot_decide = []
+
+
+    conn = pymysql.connect(**db_settings)
+
+    for t in reset_is_latest_list: # 3403
+        temp = total_df[(total_df.tmp_taxon_id==t)&(total_df.ru_status=='accepted')]
+        if len(temp):
+            latest_ru_id_list = check_latest(temp=temp, conn=conn)
+            if not len(latest_ru_id_list):
+                cannot_decide.append(t)
+            else:
+                total_df.loc[total_df.tmp_taxon_id== t, 'is_latest'] = False
+                total_df.loc[total_df.ru_id.isin(latest_ru_id_list), 'is_latest'] = True
+
+
+    # 如果在一個tmp_taxon_id裡，最新文獻中有兩個有效分類群，則代表可能有物種拆分的情況產生
+    total_df = total_df.drop_duplicates()
+    total_df = total_df.reset_index(drop=True)
+    total_df = total_df.replace({np.nan: None})
+
+    # step 3. 若分類群中有兩筆最新接受名，且為上下階層的關係，將其獨立
+
+    check_tmp = total_df[(total_df.is_latest==1)&(total_df.ru_status=='accepted')][['tmp_taxon_id','reference_id','accepted_taxon_name_id']].drop_duplicates().groupby(['tmp_taxon_id','reference_id'], as_index=False).count()
+    check_tmp_taxon_id = check_tmp[check_tmp.accepted_taxon_name_id>1].tmp_taxon_id.to_list()
+
+    reset_is_latest_list = []
+
+    # NOTE 目前會被組在一起的情況
+    # 1. 相同accepted_taxon_name_id的學名使用
+    # 2. 承名種下的學名使用
+    # 3. 接受名為同模式學名的學名使用（原始組合名本身、有相同的原始組合名、是對方的原始組合名）
+
+    # 需要拆分的一定是 1. 承名種下的關係 2. 同模式學名關係
+    # 先處理上下階層的關係
+
+    no_parent = [] 
+    # 要確定 check_tmp_taxon_id 中 有哪些需要加入no_parent
+    for ctt in check_tmp_taxon_id:
+        rows = total_df[total_df.tmp_taxon_id==ctt]
+        # 如果有任兩個最新接受名彼此是上下階層的關係 則加入no_parent判斷
+        rows_latest = rows[(rows.is_latest==True)&(rows.ru_status=='accepted')]
+        rows_latest_acp_name = rows_latest.taxon_name_id.to_list()
+        for rlan in rows_latest_acp_name:
+            if len(rows_latest[rows_latest.parent_taxon_name_id==rlan]):
+                # print(ctt)
+                no_parent.append(ctt)
+
+    # 上階層同為最新接受名的情況
+    for s in no_parent: # 214
+        rows = total_df[total_df.tmp_taxon_id==s]
+        # 限定最新接受名是種下階層
+        # 有可能兩個都是種下 用max_layer_count來判斷誰是下階層
+        rows_latest = rows[(rows.ru_status=='accepted')&(rows.is_latest==True)&(rows.rank_id.isin(sub_lin_ranks))]
+        max_layer_count = rows_latest.layer_count.max()
+        # 上階層給予新的tmp_taxon_id
+        parent_taxon_name_id = rows_latest[rows_latest.layer_count==max_layer_count].parent_taxon_name_id.values[0]
+        current_accepted_taxon_name_id = rows_latest[rows_latest.layer_count==max_layer_count].accepted_taxon_name_id.values[0]
+        # 2024-12 這邊直接改成按照階層分
+        df_parent = rows[rows.layer_count==max_layer_count]
+        df = rows[rows.layer_count!=max_layer_count]
+        new_tmp_taxon_id = total_df.tmp_taxon_id.max() + 1
+        reset_is_latest_list.append(s)
+        reset_is_latest_list.append(new_tmp_taxon_id)
+        # 給予下階層新的tmp_taxon_id
+        total_df.loc[total_df.ru_id.isin(df.ru_id.to_list()),'tmp_taxon_id'] = new_tmp_taxon_id
+        total_df, cannot_decide = reset_latest(total_df,[s,new_tmp_taxon_id], conn)
+
+
+    # 20241209
+    reset_is_latest_list = list(dict.fromkeys(reset_is_latest_list))
+
+    cannot_decide = []
+
+    for t in reset_is_latest_list: # 428
+        temp = total_df[(total_df.tmp_taxon_id==t)&(total_df.ru_status=='accepted')]
+        if len(temp):
+            latest_ru_id_list = check_latest(temp=temp, conn=conn)
+            if not len(latest_ru_id_list):
+                cannot_decide.append(t)
+            else:
+                total_df.loc[total_df.tmp_taxon_id== t, 'is_latest'] = False
+                total_df.loc[total_df.ru_id.isin(latest_ru_id_list), 'is_latest'] = True
+
+    # print(cannot_decide)
+
+
+    # step 7. 若最新接受名是種下，需檢查種階層有沒有包含在裡面，有的話將其獨立
+    # NOTE 確認剩下的check_tmp_taxon_id是不是都是承名種下
+    # 是的話應該會一起出現在下方的no_parent中
+
+
+    # 這邊好像不一定一定是種下 也有可能種被設定為最新接受名 因為group order的關係 -> 最新文獻為同一篇 但接受名不同 -> 移到 step 8
+    # 處理種階層可能被包在種下的無效情況
+    sub_tmp_list = list(total_df[(total_df.ru_status=='accepted')&(total_df.is_latest==True)&(total_df.rank_id.isin(sub_lin_ranks))].tmp_taxon_id.unique())
+
+    no_parent = []
+
+    c = 0
+    for s in sub_tmp_list: # 4274
+        c += 1
+        if c % 100 == 0:
+            print(c)
+        rows = total_df[total_df.tmp_taxon_id==s]
+        ref_group_pair = ref_group_pair_total[ref_group_pair_total.ru_id.isin(rows.ru_id.to_list())]
+        # # 確認是不是所有layer_count都相同
+        if len(ref_group_pair.layer_count.unique()) > 1: 
+            # 確認自己的上階層是不是在分開的taxon 
+            max_layer_count = rows[(rows.ru_status=='accepted')&(rows.is_latest==True)].layer_count.max()
+            parent_taxon_name_id = rows[(rows.ru_status=='accepted')&(rows.is_latest==True)&(rows.layer_count==max_layer_count)].parent_taxon_name_id.values[0]
+            current_accepted_taxon_name_id = rows[(rows.ru_status=='accepted')&(rows.is_latest==True)&(rows.layer_count==max_layer_count)].accepted_taxon_name_id.values[0]
+            # 也要考慮 跨越兩層被組在一起的情況
+            # 有上階層的接受學名使用 // 如果是上階層是分開taxon的無效名也可以
+            # 1. 自己 和 自己的上階層被組在一起
+            if len(rows[(rows.taxon_name_id==parent_taxon_name_id)&(rows.accepted_taxon_name_id!=current_accepted_taxon_name_id)&(rows.ru_status!='misapplied')]):
+                # 如果上階層已經在其他分類群 在這邊可以忽略 因為有同物異名的關係 在後面會判斷誰要併入誰
+                if not len(total_df[(~total_df.ru_id.isin(rows.ru_id.to_list()))&(total_df.taxon_name_id==parent_taxon_name_id)&(total_df.accepted_taxon_name_id!=current_accepted_taxon_name_id)&(total_df.ru_status!='misapplied')]):
+                    no_parent.append(s)
+            elif len(total_df[(total_df.taxon_name_id==parent_taxon_name_id)&(total_df.ru_status!='misapplied')]):
+                # 2. 自己 和 自己上階層的上階層被組在一起
+                # 先找到自己的上階層
+                # 自己的上階層的上階層
+                p_parent = total_df[(total_df.taxon_name_id==parent_taxon_name_id)&(total_df.ru_status!='misapplied')].parent_taxon_name_id.unique()
+                if len(rows[(rows.taxon_name_id.isin(p_parent))&(rows.accepted_taxon_name_id!=current_accepted_taxon_name_id)&(rows.ru_status!='misapplied')]):
+                    # 如果上上階層已經在其他分類群 在這邊可以忽略 因為有同物異名的關係 在後面會判斷誰要併入誰
+                    if not len(total_df[(~total_df.ru_id.isin(rows.ru_id.to_list()))&(total_df.taxon_name_id.isin(p_parent))&(total_df.accepted_taxon_name_id!=current_accepted_taxon_name_id)&(total_df.ru_status!='misapplied')]):
+                        no_parent.append(s)
+
+    no_parent = list(dict.fromkeys(no_parent))
+
+
+    cannot_decide = []
+    # 處理上階層被合併在一起 但不是最新接受名的情況
+    for s in no_parent: # 179
+        rows = total_df[total_df.tmp_taxon_id==s]
+        # 限定最新接受名是種下階層
+        rows_latest = rows[(rows.ru_status=='accepted')&(rows.is_latest==True)&(rows.rank_id.isin(sub_lin_ranks))]
+        max_layer_count = rows_latest.layer_count.max()
+        # 有可能兩個都是種下 用max_layer_count來判斷誰是下階層
+        # 上階層的同物異名, 同模異名, 基礎名本身分為一群 給予新的tmp_taxon_id
+        parent_taxon_name_id = rows_latest[rows_latest.layer_count==max_layer_count].parent_taxon_name_id.values[0]
+        current_accepted_taxon_name_id = rows_latest[rows_latest.layer_count==max_layer_count].accepted_taxon_name_id.values[0]
+        # 這邊直接改成按照階層分
+        df_parent = rows[rows.layer_count==max_layer_count]
+        df = rows[rows.layer_count!=max_layer_count]
+        new_tmp_taxon_id = total_df.tmp_taxon_id.max() + 1
+        reset_is_latest_list.append(s)
+        reset_is_latest_list.append(new_tmp_taxon_id)
+        # 給予下階層新的tmp_taxon_id
+        total_df.loc[total_df.ru_id.isin(df.ru_id.to_list()),'tmp_taxon_id'] = new_tmp_taxon_id
+        total_df, cannot_decide = reset_latest(total_df,[s,new_tmp_taxon_id],conn)
+
+    reset_is_latest_list = list(dict.fromkeys(reset_is_latest_list))
+
+    cannot_decide = []
+
+    for t in reset_is_latest_list: # 1380
+        temp = total_df[(total_df.tmp_taxon_id==t)&(total_df.ru_status=='accepted')]
+        if len(temp):
+            latest_ru_id_list = check_latest(temp=temp, conn=conn)
+            if not len(latest_ru_id_list):
+                cannot_decide.append(t)
+            else:
+                total_df.loc[total_df.tmp_taxon_id== t, 'is_latest'] = False
+                total_df.loc[total_df.ru_id.isin(latest_ru_id_list), 'is_latest'] = True
+
+
+    # step 8. 若承名關係最新接受名為種，種與種下各自有有效的學名使用，且除backbone外沒有其他文獻指出他們為同物異名，將承名種下獨立出來
+
+    spe_tmp_list = list(total_df[(total_df.ru_status=='accepted')&(total_df.is_latest==True)&(total_df.rank_id==34)&(total_df.autonym_group.notnull())].tmp_taxon_id.unique())
+
+    reset_is_latest_list = []
+    cannot_decide = []
+
+    # 承名種下有被非backbone的文獻設定成同物異名
+
+    for s in spe_tmp_list: # 1273
+        rows = total_df[total_df.tmp_taxon_id==s]
+        parent_auto_group = rows[(rows.ru_status=='accepted')&(rows.is_latest==True)].autonym_group.values[0]
+        max_layer_count = rows[(rows.ru_status=='accepted')&(rows.is_latest==True)].layer_count.values[0]
+        # parent_object_group = rows[(rows.ru_status=='accepted')&(rows.is_latest==True)].object_group.values[0]
+        parent_taxon_name_id = rows[(rows.ru_status=='accepted')&(rows.is_latest==True)].taxon_name_id.values[0]
+        # 先確定承名種下是不是在同一個taxon中 且有有效的學名使用
+        sub_accepted_rows = rows[(rows.autonym_group==parent_auto_group)&(rows.parent_taxon_name_id==parent_taxon_name_id)&(rows.ru_status=='accepted')]
+        if len(sub_accepted_rows):
+            current_accepted_taxon_name_id = sub_accepted_rows.taxon_name_id.values[0]
+            # 確認沒有除了backbone以外的同物異名關係
+            # 種是種下的同物異名 / 種下是種的同物異名
+            if not len(rows[(rows.accepted_taxon_name_id==parent_taxon_name_id)&(rows.taxon_name_id==current_accepted_taxon_name_id)&(rows.type!=4)&(rows.ru_status=='not-accepted')]) and not len(rows[(rows.accepted_taxon_name_id==current_accepted_taxon_name_id)&(rows.taxon_name_id==parent_taxon_name_id)&(rows.type!=4)&(rows.ru_status=='not-accepted')]):
+                # 這邊直接改成按照階層分
+                # df_parent = rows[rows.layer_count==max_layer_count]
+                df = rows[rows.layer_count!=max_layer_count]
+                new_tmp_taxon_id = total_df.tmp_taxon_id.max() + 1
+                reset_is_latest_list.append(s)
+                reset_is_latest_list.append(new_tmp_taxon_id)
+                # 給予下階層新的tmp_taxon_id
+                total_df.loc[total_df.ru_id.isin(df.ru_id.to_list()),'tmp_taxon_id'] = new_tmp_taxon_id
+                total_df, cannot_decide = reset_latest(total_df,[new_tmp_taxon_id,s],conn)
+
+
+    # print(cannot_decide)
+
+    reset_is_latest_list = list(dict.fromkeys(reset_is_latest_list))
+
+    cannot_decide = []
+
+    # c = 0
+    for t in reset_is_latest_list: # 444
+        temp = total_df[(total_df.tmp_taxon_id==t)&(total_df.ru_status=='accepted')]
+        if len(temp):
+            latest_ru_id_list = check_latest(temp=temp, conn=conn)
+            if not len(latest_ru_id_list):
+                cannot_decide.append(t)
+            else:
+                total_df.loc[total_df.tmp_taxon_id== t, 'is_latest'] = False
+                total_df.loc[total_df.ru_id.isin(latest_ru_id_list), 'is_latest'] = True
+
+    # NOTE 不檢查
+
+    # step 10. 確認誤用在分類群的地位
+    # 同時出現誤用與無效：若與同一分類群的有效名為同模，都改成無效。若與有效名非同模，判斷文獻優先性決定是誤用或無效，都改為判斷結果。
+    # 誤用名若與同一分類群的有效名為同模式異名，需改為無效名。
+
+    check_misapplied_list = total_df[total_df.ru_status=='misapplied'].tmp_taxon_id.unique()
+
+    # has_more_than_one_status = []
+    need_new_taxon_misapplied = []
+
+    for t in check_misapplied_list:
+        rows = total_df[total_df.tmp_taxon_id==t]
+        misapplied_name_ids = rows[rows.ru_status=='misapplied'].taxon_name_id.unique()
+        for mm in misapplied_name_ids:            
+            mm_rows = rows[rows.taxon_name_id==mm]
+            # 先確定和同一分類群的有效名為同模是不是同模式異名
+            acp_name_object_group = rows[(rows.ru_status=='accepted')&(rows.is_latest==True)].object_group.values[0]
+            misapplied_object_group = mm_rows.object_group.values[0]
+            is_obj_syns = False
+            if misapplied_object_group and acp_name_object_group and misapplied_object_group == acp_name_object_group:
+                is_obj_syns = True
+            if len(mm_rows[mm_rows.ru_status!='accepted'].ru_status.unique()) > 1:
+                if is_obj_syns:
+                    # 若與同一分類群的有效名為同模，都改成無效。
+                    # 只修改原本地位為無效或誤用 有效的維持有效
+                    total_df.loc[total_df.ru_id.isin(mm_rows[mm_rows.ru_status!='accepted'].ru_id.to_list()),'ru_status'] = 'not-accepted'
+                else:
+                    # 若與有效名非同模，判斷文獻優先性決定是誤用或無效，都改為判斷結果。
+                    latest_misapplied_ru = check_status_latest(temp=mm_rows, conn=conn)
+                    if len(latest_misapplied_ru) == 1:
+                        latest_misapplied_ru = latest_misapplied_ru[0]
+                        current_status = mm_rows[mm_rows.ru_id==latest_misapplied_ru].ru_status.values[0]
+                        if current_status == 'misapplied':
+                            # 應該要先確認誤用名是不是在其他獨立的taxon 且地位非誤用
+                            # TODO 如果是同模異名也不需要拿走
+                            if len(total_df[(total_df.taxon_name_id==mm)&(total_df.ru_status=='accepted')&(total_df.tmp_taxon_id==t)]) and not len(total_df[(total_df.taxon_name_id==mm)&(total_df.ru_status!='misapplied')&(total_df.tmp_taxon_id!=t)]):
+                                need_new_taxon_misapplied.append(mm)
+                        total_df.loc[total_df.ru_id.isin(mm_rows[mm_rows.ru_status!='accepted'].ru_id.to_list()),'ru_status'] = current_status
+            else: # 只有誤用一種地位
+                # 誤用名若與同一分類群的有效名為同模式異名，需改為無效名。
+                # 確認是不是同模
+                if is_obj_syns:
+                    total_df.loc[total_df.ru_id.isin(mm_rows[mm_rows.ru_status=='misapplied'].ru_id.to_list()),'ru_status'] = 'not-accepted'
+
+
+
+    cannot_decide = []
+
+    for t in check_misapplied_list: # 600
+        temp = total_df[(total_df.tmp_taxon_id==t)&(total_df.ru_status=='accepted')]
+        latest_ru_id_list = check_latest(temp=temp, conn=conn)
+        if not len(latest_ru_id_list):
+            cannot_decide.append(t)
+        else:
+            total_df.loc[total_df.tmp_taxon_id== t, 'is_latest'] = False
+            total_df.loc[total_df.ru_id.isin(latest_ru_id_list), 'is_latest'] = True
+
+    reset_is_latest_list = []
+
+    for mm in need_new_taxon_misapplied:
+        if len(total_df[(total_df.taxon_name_id==mm)&(total_df.ru_status!='misapplied')]):
+            rows = total_df[total_df.accepted_taxon_name_id==mm]
+            now_tmp_taxon_id = rows.tmp_taxon_id.values[0]
+            # 底下的同物異名要分配
+            ref_group_pair = ref_group_pair_total[ref_group_pair_total.taxon_name_id==mm]
+            new_names = [mm]
+            name_list = [mm]
+            df = pd.DataFrame(columns=['reference_id','accepted_taxon_name_id'])
+            ref_group_pair_now_obj = ref_group_pair[(ref_group_pair.object_group.notnull())&(ref_group_pair.ru_status=='accepted')][['reference_id','accepted_taxon_name_id','object_group']].drop_duplicates()
+            while len(new_names) > 0:
+                for nn in new_names:
+                    if nn in new_names:
+                        object_group = name_df[name_df.taxon_name_id==nn].object_group.values[0]
+                        new_names, df, name_list = get_related_names_sub(taxon_name_id=nn, 
+                                                                            df=df, 
+                                                                            new_names=new_names, 
+                                                                            name_list=name_list, 
+                                                                            ref_group_pair_now=ref_group_pair, 
+                                                                            object_group=object_group, 
+                                                                            ref_group_pair_now_obj=ref_group_pair_now_obj, 
+                                                                            )
+            df = df.drop_duplicates()
+            df = df.merge(ref_group_pair)
+            # 底下同物異名也要拿過去 前面已經判斷過了 之前取就好
+            now_syns = df[df.ru_status!='misapplied'].taxon_name_id.unique()
+            syns_acp = rows[(rows.taxon_name_id.isin(now_syns))&(rows.ru_status!='misapplied')].accepted_taxon_name_id.unique()
+            new_ru_list = df.ru_id.to_list()
+            new_ru_list += rows[(rows.taxon_name_id.isin(now_syns))&(rows.ru_status!='misapplied')].ru_id.to_list()
+            new_ru_list += rows[(rows.accepted_taxon_name_id.isin(syns_acp))].ru_id.to_list()
+            new_tmp_taxon_id = total_df.tmp_taxon_id.max() + 1
+            reset_is_latest_list.append(now_tmp_taxon_id)
+            reset_is_latest_list.append(new_tmp_taxon_id)
+            total_df.loc[total_df.ru_id.isin(new_ru_list),'tmp_taxon_id'] = new_tmp_taxon_id
+
+
+    reset_is_latest_list = list(dict.fromkeys(reset_is_latest_list))
+
+    cannot_decide = []
+
+    for t in reset_is_latest_list: # 1802
+        temp = total_df[(total_df.tmp_taxon_id==t)&(total_df.ru_status=='accepted')]
+        if len(temp):
+            latest_ru_id_list = check_latest(temp=temp, conn=conn)
+            if not len(latest_ru_id_list):
+                cannot_decide.append(t)
+            else:
+                total_df.loc[total_df.tmp_taxon_id== t, 'is_latest'] = False
+                total_df.loc[total_df.ru_id.isin(latest_ru_id_list), 'is_latest'] = True
+
+
+    # NOTE 不檢查
+
+    total_df['taxon_status'] = ''
+
+    # c = 0  
+    for i in total_df.tmp_taxon_id.unique(): # 11649
+        # c += 1
+        # if c % 100 == 0:
+        #     print(c)
+        accepted_name_id = total_df[(total_df['tmp_taxon_id'] == i) & (total_df['ru_status'] == 'accepted') & (total_df['is_latest'] == 1)]['taxon_name_id'].to_list()[0]
+        not_accepted_name_ids = total_df[(total_df['tmp_taxon_id'] == i) & (total_df['ru_status'] == 'not-accepted') & (total_df['is_latest'] == 1)]['taxon_name_id'].to_list()
+        # 誤用地位已經在前面的步驟確認了 所以這邊一定是誤用沒錯
+        misapplied_name_ids = total_df[(total_df['tmp_taxon_id'] == i) & (total_df['ru_status'] == 'misapplied')]['taxon_name_id'].to_list()
+        total_df.loc[(total_df.tmp_taxon_id==i)&(total_df.taxon_name_id.isin(misapplied_name_ids))&(total_df.taxon_name_id!=accepted_name_id)&(~total_df.taxon_name_id.isin(not_accepted_name_ids)),'taxon_status'] = 'misapplied'
+        total_df.loc[(total_df.tmp_taxon_id==i)&(total_df.taxon_name_id==accepted_name_id),'taxon_status'] = 'accepted'
+        total_df.loc[(total_df.tmp_taxon_id==i)&(total_df.taxon_status==''),'taxon_status'] = 'not-accepted'
+
+
+    total_df = total_df.drop_duplicates()
+    total_df = total_df.reset_index(drop=True)
+
+    # 這邊在串回來的時候 要把accepted_taxon_name_id改回原本的 
+    # 直接用ru_id串?
+    conn = pymysql.connect(**db_settings)
+
+
+    # 俗名backbone
+    # 要確認是不是需要加上TaiCOL backbone
+    if use_common_name_backbone:
+        query = '''SELECT properties, id, accepted_taxon_name_id, taxon_name_id, reference_id
+                    FROM reference_usages WHERE deleted_at IS NULL AND reference_id = 95 AND taxon_name_id IN %s'''
+        with conn.cursor() as cursor:
+            execute_line = cursor.execute(query, (list(total_df.taxon_name_id.unique()),))
+            common_names_rus = cursor.fetchall()
+            common_names_rus = pd.DataFrame(common_names_rus, columns=['properties','ru_id','accepted_taxon_name_id', 'taxon_name_id','reference_id'])
+            common_names_rus['publish_year'] = 1000 
+
+
+    query = '''SELECT ru.properties, ru.id, ru.accepted_taxon_name_id, ru.taxon_name_id, ru.reference_id, r.subtitle, ru.type_specimens
+                FROM reference_usages ru
+                JOIN `references` r ON r.id = ru.reference_id
+                WHERE ru.deleted_at IS NULL AND ru.id IN %s'''
+
+    with conn.cursor() as cursor:
+        execute_line = cursor.execute(query, (list(total_df.ru_id.unique()),))
+        rus = cursor.fetchall()
+        rus = pd.DataFrame(rus, columns=['properties','ru_id','accepted_taxon_name_id', 'taxon_name_id','reference_id', 'subtitle', 'type_specimens'])
+
+    # 因為前面誤用有調整accepted_taxon_name_id 所以在這邊調整回來
+    total_df = total_df.drop(columns=['accepted_taxon_name_id', 'taxon_name_id', 'reference_id'])
+    total_df = total_df.merge(rus[['ru_id', 'accepted_taxon_name_id', 'taxon_name_id', 'reference_id']])
+    total_df = total_df.replace({np.nan: None})
+
+    # 匯入包含per_usage、模式、屬性、俗名等，只是這邊是簡易異名表顯示。臺
+
+    # 新增欄位 / 自訂欄位 要用
+    # 不用匯人的: 標註、台灣分布地、新紀錄、原生/外來備註、備註
+
+    # 需彙整的欄位:
+    # 1 common_names v -> properties
+    # 2 新增 / 自訂欄位 v -> properties
+    # 3 模式標本 v -> type_specimens
+    # 4 per_usages -> 須依優先序決定pro parte的相關設定 v -> per_usages
+
+    # 依照優先序決定
+    # 1 is_系列 v -> properties
+    # 屬以上存在於臺灣設定為未知(2)，種、種下依照usage。 v
+    # 2 alien_type v -> properties
+
+
+
+
+
+    # 產出後需要重新排序
+    # 屬 名先字母排序排 ， 分類群 再依 「有效名 」 的字母排序 ，無效名 /誤用名自己在分類 群中依照字母排序 。
+
+
+    # id
+    # parent_taxon_name_id
+    # reference_id
+    # accepted_taxon_name_id
+    # taxon_name_id
+    # status
+    # group
+    # order
+    # per_usages
+    # type_specimens
+    # properties
+    # updated_at
+
+
+    query = '''SELECT max(tmp_checklist_id) from tmp_namespace_usages;'''
+
+    with conn.cursor() as cursor:
+        execute_line = cursor.execute(query)
+        tmp_checklist_id = cursor.fetchone()[0]
+        tmp_checklist_id = tmp_checklist_id + 1 if tmp_checklist_id else 1
+
+    final_usages = []
+
+    for nt in total_df.tmp_taxon_id.unique():
+        # now_count += 1
+        # if now_count % 10 == 0:
+        #     print(now_count)
+        rows = total_df[total_df['tmp_taxon_id']==nt]
+        # 這邊也許不用檢查是不是只有最新的一筆有效
+        # 如果決定不出來的 在前面一步就先選擇一個作為有效名
+        # if len(rows[(rows['is_latest']==True) & (rows['taxon_status'] == 'accepted')][['reference_id', 'accepted_taxon_name_id', 'taxon_name_id']].drop_duplicates()) == 1:
+        try:
+            i = rows[(rows['is_latest']==True) & (rows['taxon_status'] == 'accepted')].index[0] # 接受的row
+            row = total_df.iloc[i] # 接受的row
+            accepted_taxon_name_id = row.accepted_taxon_name_id
+            parent_taxon_name_id = row.parent_taxon_name_id
+            # 彙整
+            ru_list = rows[['publish_year','ru_id']]
+            tmp_ru_df = rus.merge(ru_list,left_on=['ru_id'],right_on=['ru_id']) # 這裡是加上publish_year
+            now_prop = determine_prop(conn, rows, accepted_taxon_name_id, tmp_ru_df, refs)
+            if rank_order_map[row.rank_id] <= rank_order_map[30]: # 屬以上 顯示未知
+                now_prop['is_in_taiwan'] = 2
+            # is_hybrid
+            name_list = rows.taxon_name_id.unique()
+            now_prop['is_hybrid'] = True if len(name_df[(name_df.taxon_name_id.isin(name_list))&(name_df.is_hybrid=='true')]) else False
+            # 1 俗名
+            # 從這邊要加上俗名backbone的資料
+            # 俗名只需排除重複就好
+            if use_common_name_backbone:
+                common_rus = common_names_rus[common_names_rus.taxon_name_id.isin(rows.taxon_name_id.to_list())]
+                if len(common_rus):
+                    common_rus = common_rus.reset_index(drop=True)
+                    tmp_ru_df = pd.concat([tmp_ru_df, common_rus], ignore_index=True)            
+            common_names = []
+            for p in tmp_ru_df.properties.values:
+                try:
+                    if prop := json.loads(p):
+                        # print(prop)
+                        if prop.get('common_names'):
+                            common_names += prop.get('common_names')
+                except Exception as e: 
+                    print('common_name', e)
+                    pass
+            if len(common_names):
+                common_names = pd.DataFrame(common_names)
+                # area 有台灣 / Taiwan不同寫法 可能會有重複的common name
+                common_names = common_names.replace({np.nan: None})
+                common_names = common_names.drop(columns=['area'])
+                common_names = common_names.drop_duplicates().to_dict('records')
+                now_prop['common_names'] = common_names
+            # 2 新增 / 自訂欄位 -> 全部組合在一起 並加上citation 依年份排序
+            additional_fields = []
+            custom_fields = []
+            for p in tmp_ru_df.to_dict('records'):
+                if prop := json.loads(p.get('properties')):
+                    try:
+                        if prop.get('additional_fields'):
+                            for pp in prop.get('additional_fields'):
+                                pp['reference_id'] = p.get('reference_id')
+                                pp['publish_year'] = p.get('publish_year')
+                                pp['subtitle'] = p.get('subtitle')
+                                additional_fields.append(pp)
+                        if prop.get('custom_fields'):
+                            for pp in prop.get('custom_fields'):
+                                pp['reference_id'] = p.get('reference_id')
+                                pp['publish_year'] = p.get('publish_year')
+                                pp['subtitle'] = p.get('subtitle')
+                                custom_fields.append(pp)
+                    except Exception as e: 
+                        print('additional / custom fields', e)
+                        pass
+            # additional_fields -> 根據 field_name group 在一起
+            if len(additional_fields):
+                additional_fields = pd.DataFrame(additional_fields)
+                # 要維持是additional_fields的欄位 但彙整在一起
+                # merged_additional_fields
+                additional_fields['formatted'] = additional_fields.apply(lambda row: f"{row['field_value']} ({row['subtitle']})", axis=1)
+                # 依據 field_name 和 publish_year 排序
+                additional_fields = additional_fields.sort_values(by=['field_name', 'publish_year'])
+                # 根據 field_name 分組，合併 formatted 欄位
+                additional_fields = additional_fields.groupby('field_name')['formatted'].apply('<br>'.join).reset_index()
+                additional_fields = additional_fields.rename(columns={'formatted': 'field_value'})
+                additional_fields = additional_fields.replace({np.nan: None})
+                additional_fields = additional_fields.to_dict('records')
+                now_prop['additional_fields'] = additional_fields
+            # custom_fields -> 根據 field_name_en group 在一起
+            if len(custom_fields):
+                custom_fields = pd.DataFrame(custom_fields)
+                # 要維持是custom_fields的欄位 但彙整在一起
+                # merged_custom_fields
+                custom_fields['formatted'] = custom_fields.apply(lambda row: f"{row['field_value']} ({row['subtitle']})", axis=1)
+                # 依據 field_name_en 和 publish_year 排序
+                custom_fields = custom_fields.sort_values(by=['field_name_en', 'publish_year'])
+                # 根據 field_name_en 分組，合併 formatted 欄位
+                custom_fields = custom_fields.groupby('field_name_en')['formatted'].apply('<br>'.join).reset_index()
+                custom_fields = custom_fields.rename(columns={'formatted': 'field_value'})
+                custom_fields = custom_fields.replace({np.nan: None})
+                custom_fields = custom_fields.to_dict('records')
+                now_prop['custom_fields'] = custom_fields
+            # 3 模式標本
+            type_specimens = []
+            for p in tmp_ru_df.type_specimens.values:
+                try:
+                    if now_spe := json.loads(p):
+                        type_specimens += now_spe
+                except Exception as e: 
+                    print('type_specimens', e)
+                    pass
+            if len(type_specimens):
+                type_specimens = pd.DataFrame(type_specimens)
+                # type_specimens = type_specimens.drop_duplicates()
+                type_specimens = type_specimens.replace({np.nan: None})
+                type_specimens = type_specimens.to_dict('records')
+            # 4 per_usages
+            per_usages = []
+            for p in rows.to_dict('records'):
+                if now_usages := json.loads(p.get('per_usages')):
+                    per_usages += [{**item, 'including_usage_id': p.get('ru_id')}  for item in now_usages]
+            if len(per_usages):
+                per_usages = pd.DataFrame(per_usages)
+                # 如果有reference_id重複時 要依including_usage_reference_id優先序選擇優先的那個
+                duplicated_refs = per_usages[per_usages.reference_id.duplicated()].reference_id.unique()
+                for ref in duplicated_refs:
+                    temp = rows[rows.ru_id.isin(per_usages[per_usages.reference_id==ref].including_usage_id.to_list())]
+                    chosen_ru_list = check_prop_status_latest(temp, conn)
+                    removing_ru_id = [rr for rr in temp.ru_id.to_list() if rr not in chosen_ru_list]
+                    per_usages = per_usages[~per_usages.including_usage_id.isin(removing_ru_id)]
+                per_usages = per_usages.replace({np.nan: None})
+                per_usages = per_usages.drop(columns=['including_usage_id']).to_dict('records')
+            # 所有屬性 資訊跟著有效名
+            # 其他學名就存成無效 or 誤用
+            # 要先在介面回傳預覽表，OK後才存進去my_namespace_usage
+            # 還是先存入一個暫存的表 確定後再存入my_namespace_usage 匯入 or 選擇不匯入之後 再將這個暫時表的內容刪除
+            # 在這邊整理要存入properties的欄位
+            # 不管是什麼地位 學名都只保留一個
+            taxon_names = rows[['taxon_name_id','taxon_status','rank_id']].drop_duplicates().to_dict('records')
+            for rrr in taxon_names:
+                # print(rrr.get('taxon_name_id'))
+                now_dict = {
+                    'tmp_taxon_id': nt,
+                    'taxon_name_id': rrr.get('taxon_name_id'),
+                    'status': rrr.get('taxon_status'),
+                    'rank_id': rrr.get('rank_id') # for後面排序用的
+                }
+                if rrr.get('taxon_status') == 'accepted':
+                    now_dict['properties'] = safe_json_dumps(now_prop)
+                    now_dict['parent_taxon_name_id'] = parent_taxon_name_id
+                    now_dict['per_usages'] = safe_json_dumps(per_usages)
+                    now_dict['type_specimens'] = safe_json_dumps(type_specimens)
+                else:
+                    now_dict['properties'] = '{}'
+                    now_dict['parent_taxon_name_id'] = None
+                    now_dict['per_usages'] = '[]'
+                    now_dict['type_specimens'] = '[]'
+                final_usages.append(now_dict)
+        except Exception as e: 
+            print('merging', e)
+            pass
+
+            # taxon_name_id
+            # status
+            # group -> 分類群
+            # order -> 排序（不管分類群的總排序）
+            # 如果是accepted才會有
+            # parent_taxon_name_id
+            # per_usages
+            # properties
+            # type_specimens
+            # 統一新增
+            # tmp_checklist_id
+            # updated_at
+
+    # print(final_usages)
+
+    # 排序
+
+    # 科->科底下的屬->屬底下的種&種下
+    # 除了科以外 應該可以直接用字母排
+    # 先根據字母排 再根據自己的上階層排 
+    # 先排有效名
+    final_usages = pd.DataFrame(final_usages)
+
+    # 先取出屬 & 屬以下的
+    final_usages['rank_order'] = final_usages.rank_id.apply(lambda x: rank_order_map[x])
+    accepted_usages = final_usages[(final_usages.status=='accepted')&(final_usages.rank_order>=rank_order_map[30])][['taxon_name_id','parent_taxon_name_id','rank_id','tmp_taxon_id']].drop_duplicates()
+    accepted_usages = accepted_usages.merge(name_df[['taxon_name_id','name']].drop_duplicates())
+    # 直接按照字母排序
+    accepted_usages = accepted_usages.sort_values('name')
+    accepted_usages = accepted_usages.reset_index(drop=True)
+
+    # 再把屬以上的加進去
+    # 從下往上排
+    family_usages = final_usages[(final_usages.status=='accepted')&(final_usages.rank_order<rank_order_map[30])][['taxon_name_id','parent_taxon_name_id','rank_id','tmp_taxon_id']].drop_duplicates()
+    family_usages = family_usages.merge(name_df[['taxon_name_id','name']].drop_duplicates()).sort_values(['rank_id','name'],ascending=False)
+
+    for ff in family_usages.to_dict('records'):
+        new_row = final_usages[(final_usages.tmp_taxon_id==ff.get('tmp_taxon_id'))&(final_usages.status=='accepted')][['taxon_name_id','parent_taxon_name_id','rank_id','tmp_taxon_id']]
+        if len(accepted_usages[accepted_usages.parent_taxon_name_id==ff.get('taxon_name_id')]):
+            min_id = accepted_usages[accepted_usages.parent_taxon_name_id==ff.get('taxon_name_id')].index.min()
+            accepted_usages = pd.concat([accepted_usages.iloc[:min_id], new_row, accepted_usages.iloc[min_id:]]).reset_index(drop=True)
+        else:
+            # 如果沒有的話就放在最前面 這邊也需要按照字母排
+            accepted_usages = pd.concat([new_row, accepted_usages]).reset_index(drop=True)
+
+    # 最後再把每個tmp_taxon_id的usage加進去
+    other_usages = final_usages[final_usages.status!='accepted'][['taxon_name_id','parent_taxon_name_id','rank_id','tmp_taxon_id']]
+    
+    if len(other_usages):
+        other_usages = other_usages.merge(name_df[['taxon_name_id','name']].drop_duplicates())
+        other_usages = other_usages.sort_values('name')
+        for oo in other_usages.tmp_taxon_id.unique():
+            max_id = accepted_usages[accepted_usages.tmp_taxon_id==oo].index.max()+1
+            new_rows = other_usages[other_usages.tmp_taxon_id==oo]
+            accepted_usages = pd.concat([accepted_usages.iloc[:max_id], new_rows, accepted_usages.iloc[max_id:]]).reset_index(drop=True)
+
+    final_usage_df = accepted_usages.merge(final_usages)
+    final_usage_df = final_usage_df.reset_index(drop=True)
+
+    final_usage_df['order'] = final_usage_df.index
+
+    # print('-----1-----')
+    # print(final_usages)
+    # print('-----2-----')
+    # print(accepted_usages)
+    # print('-----3-----')
+    # print(final_usage_df)
+
+
+    group_keys = final_usage_df['tmp_taxon_id'].drop_duplicates().reset_index(drop=True)
+    group_id_map = {k: i+1 for i, k in enumerate(group_keys)}
+
+    final_usage_df['group'] = final_usage_df['tmp_taxon_id'].map(group_id_map)
+
+    # 存入資料庫
+    final_usage_df['tmp_checklist_id'] = tmp_checklist_id
+    final_usage_df = final_usage_df[['parent_taxon_name_id','tmp_checklist_id','taxon_name_id','status','group','order','per_usages','type_specimens','properties']]
+    
+    db_string = 'mysql+pymysql://{}:{}@{}:{}/{}'.format(db_settings.get('user'), db_settings.get('password'), db_settings.get('host'), db_settings.get('port'), db_settings.get('db'))
+    db = create_engine(db_string)
+
+    # print(final_usage_df)
+
+    final_usage_df.to_sql('tmp_namespace_usages',
+        con=db,
+        if_exists='append',   # 'fail' | 'replace' | 'append'
+        index=False,
+        chunksize=1000         # 每次 insert 幾筆資料（依需求調整）
+    )
+
+    # 回傳tmp_checklist_id給工具 工具再用這個id回傳usage給工具前端
+
+    return HttpResponse(json.dumps({'tmp_checklist_id': tmp_checklist_id}))

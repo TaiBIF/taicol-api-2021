@@ -48,6 +48,8 @@ api_patterns = [
     path('web/stat/index', api_view.web_index_stat),
     path('web/stat/statistics', api_view.web_stat_stat),
     path('update_check_usage', api_view.update_check_usage),
+    path('get_taxon_by_higher', api_view.get_taxon_by_higher),
+    path('generate_checklist', api_view.generate_checklist),
 ]
 
 urlpatterns = [

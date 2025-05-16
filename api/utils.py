@@ -387,16 +387,9 @@ def get_conditioned_solr_search(req):
     return query_list
 
 
-
-
-def check_taxon_usage():
-    # 每日更新檢查usage
-
-    # NOTE 以下都不考慮reference_id=95 因為只是單純的俗名backbone
-
+def get_whitelist(conn):
+        
     conn = pymysql.connect(**db_settings)
-
-    # 取得當前的白名單
 
     # 1. 同模出現在不同分類群
 
@@ -420,6 +413,20 @@ def check_taxon_usage():
     with conn.cursor() as cursor:
         execute_line = cursor.execute(query)
         whitelist_list_3 = pd.DataFrame(cursor.fetchall(), columns=['accepted_taxon_name_id', 'taxon_name_id', 'reference_id'])
+
+    return whitelist_list_1, whitelist_list_2, whitelist_list_3
+
+
+def check_taxon_usage():
+    # 每日更新檢查usage
+
+    # NOTE 以下都不考慮reference_id=95 因為只是單純的俗名backbone
+
+    conn = pymysql.connect(**db_settings)
+
+    # 取得當前的白名單
+
+    whitelist_list_1, whitelist_list_2, whitelist_list_3 = get_whitelist(conn)
 
     query = """SELECT ru.id, ru.status, ru.accepted_taxon_name_id, ru.taxon_name_id, ru.reference_id, tn.object_group, tn.autonym_group,
                         r.properties ->> '$.check_list_type'
