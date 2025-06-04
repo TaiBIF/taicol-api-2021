@@ -1394,14 +1394,10 @@ def generate_checklist(request):
 
     data = json.loads(request.body)
     pairs = list({(item['reference_id'], item['group']) for item in data})
-    # print(pairs)
-    
-    # pairs = [(153, 5822), (100, 9123), (153, 42197), (100, 8732), (153, 7026), (153, 1275), (2454, 1307), (153, 192), (2454, 1316), (1018, 271), (2454, 1325), (1854, 543), (99, 1), (1018, 280), (2454, 1334), (2454, 1343), (330, 1), (153, 5570), (100, 2455), (100, 9118), (100, 9127), (153, 36679), (100, 7406), (2454, 1311), (1018, 266), (100, 3070), (2454, 1320), (153, 7524), (2454, 1329), (100, 4656), (333, 1), (100, 2450), (100, 9122), (813, 4021), (100, 729), (153, 42196), (153, 5942), (2454, 1306), (153, 35645), (153, 191), (2454, 1315), (2454, 1324), (100, 3083), (153, 5551), (100, 2930), (153, 4095), (153, 5290), (2454, 1310), (1019, 315), (1019, 324), (153, 7626), (153, 5249), (3319, 265), (3319, 274), (153, 190), (153, 4202), (153, 3546), (153, 5788), (1019, 310), (1019, 319), (1019, 328), (3319, 260), (3319, 269), (1019, 305), (1019, 314), (1019, 323), (153, 6295), (153, 4098), (3319, 246), (3319, 255), (3319, 264), (3319, 273), (337, 1), (328, 10), (2454, 1371), (1019, 300), (1019, 309), (1019, 318), (100, 8926), (100, 524), (153, 5234), (3319, 241), (100, 560), (3319, 250), (3319, 259), (3319, 268), (153, 6402), (1854, 557), (153, 4205), (2454, 1357), (328, 5), (2454, 1366), (1019, 304), (1019, 313), (3319, 236), (3319, 245), (100, 3911), (3319, 254), (3319, 263), (1854, 552), (153, 36765), (1018, 289), (1854, 561), (2454, 1352), (2454, 1361), (153, 246), (328, 9), (2454, 1370), (153, 4694), (153, 5359), (1019, 299), (100, 6265), (100, 523), (3319, 231), (3319, 240), (153, 385), (3319, 249), (1854, 538), (1018, 275), (1854, 547), (1018, 284), (153, 6639), (2454, 1338), (1854, 556), (1018, 293), (2454, 1347), (2454, 1356), (328, 4), (2454, 1365), (153, 4280), (100, 8484), (153, 2748), (100, 8731), (153, 42232), (153, 6778), (100, 2342), (3319, 235), (153, 1274), (3319, 244), (1018, 270), (1854, 542), (1018, 279), (2454, 1333), (1854, 551), (1018, 288), (2454, 1342), (1854, 560), (2454, 1351), (2454, 1360), (328, 8), (2454, 1369), (100, 9117), (100, 9126), (153, 7429), (3319, 230), (1018, 265), (2454, 1319), (1854, 537), (153, 5964), (1018, 274), (2454, 1328), (1854, 546), (100, 6385), (1018, 283), (2454, 1337), (1854, 555), (1018, 292), (2454, 1346), (2454, 1355), (100, 2449), (100, 9121), (153, 35950), (153, 4279), (334, 1), (153, 42195), (153, 1273), (2454, 1305), (2454, 1314), (335, 1), (1018, 269), (2454, 1323), (1854, 541), (100, 6380), (1018, 278), (2454, 1332), (1018, 287), (129, 9), (2454, 1341), (100, 2453), (100, 9125), (406, 2), (100, 8972), (2454, 1309), (1018, 264), (2454, 1318), (1018, 273), (2454, 1327), (153, 39440), (2454, 1336), (153, 6219), (100, 2448), (153, 39058), (153, 2710), (153, 41947), (153, 4278), (153, 5190), (153, 2139), (2454, 1313), (153, 3078), (1018, 268), (2454, 1322), (129, 8), (1019, 327), (153, 7638), (153, 6326), (406, 1), (100, 8971), (2454, 1308), (153, 193), (2454, 1317), (330, 2), (1019, 322), (100, 4262), (153, 35768), (153, 1217), (153, 4097), (100, 1638), (153, 7489), (3319, 272), (153, 6604), (1019, 308), (1019, 326), (100, 8925), (153, 35848), (3319, 258), (3319, 267), (100, 586), (153, 4204), (153, 39258), (1019, 303), (153, 38373), (1019, 312), (1019, 321), (153, 4096), (3319, 253), (3319, 262), (3319, 271), (153, 41877), (100, 6197), (1019, 298), (1019, 307), (100, 5370), (1019, 316), (1019, 325), (100, 8924), (153, 36000), (153, 6306), (153, 35582), (153, 2123), (3319, 239), (3319, 248), (3319, 257), (153, 35856), (3319, 266), (3319, 275), (153, 4203), (153, 3547), (328, 3), (2454, 1364), (1019, 302), (153, 35730), (1019, 311), (1019, 320), (153, 35986), (153, 35995), (153, 42231), (3319, 234), (153, 7460), (3319, 243), (153, 5245), (3846, 7), (3319, 252), (153, 37401), (3319, 261), (3319, 270), (1854, 550), (1854, 559), (1018, 296), (2454, 1350), (2454, 1359), (328, 7), (2454, 1368), (309, 3), (153, 4036), (1019, 297), (153, 5604), (100, 2907), (153, 936), (1019, 306), (3319, 238), (336, 1), (153, 1277), (3319, 247), (3319, 256), (1854, 545), (1018, 282), (153, 42091), (1854, 554), (153, 35675), (1018, 291), (2454, 1345), (2454, 1354), (328, 2), (2454, 1363), (2454, 1372), (153, 35949), (100, 6011), (153, 35958), (1019, 301), (3319, 233), (3319, 242), (3319, 251), (1854, 540), (1018, 277), (2454, 1331), (1854, 549), (2454, 1340), (1854, 558), (1018, 295), (2454, 1349), (2454, 1358), (153, 7562), (100, 2452), (328, 6), (2454, 1367), (309, 2), (100, 9124), (153, 7153), (19, 1), (100, 8733), (100, 5453), (3319, 237), (153, 1276), (153, 1523), (2454, 1326), (1854, 544), (1018, 281), (153, 42090), (2454, 1335), (1854, 553), (1018, 290), (2454, 1344), (2454, 1353), (328, 1), (2454, 1362), (153, 2709), (153, 35948), (153, 4277), (153, 35786), (100, 7407), (153, 4133), (3319, 232), (2454, 1312), (1018, 267), (2454, 1321), (1854, 539), (1018, 276), (2454, 1330), (1854, 548), (1018, 285), (2454, 1339), (1018, 294), (2454, 1348), (153, 6896), (100, 2451), (331, 1)]
     use_common_name_backbone = True if len([p for p in pairs if p[0] == 95]) else False
 
 
     conn = pymysql.connect(**db_settings)
-
 
     # # 最後一筆學名使用更新的時間當成last_updated
     # # 這邊應該也要考慮刪除的時間 ?
@@ -2167,7 +2163,7 @@ def generate_checklist(request):
             common_names_rus['publish_year'] = 1000 
 
 
-    query = '''SELECT ru.properties, ru.id, ru.accepted_taxon_name_id, ru.taxon_name_id, ru.reference_id, r.subtitle, ru.type_specimens
+    query = '''SELECT ru.properties, ru.id, ru.accepted_taxon_name_id, ru.taxon_name_id, ru.reference_id, r.subtitle, ru.type_specimens, ru.status
                 FROM reference_usages ru
                 JOIN `references` r ON r.id = ru.reference_id
                 WHERE ru.deleted_at IS NULL AND ru.id IN %s'''
@@ -2175,7 +2171,7 @@ def generate_checklist(request):
     with conn.cursor() as cursor:
         execute_line = cursor.execute(query, (list(total_df.ru_id.unique()),))
         rus = cursor.fetchall()
-        rus = pd.DataFrame(rus, columns=['properties','ru_id','accepted_taxon_name_id', 'taxon_name_id','reference_id', 'subtitle', 'type_specimens'])
+        rus = pd.DataFrame(rus, columns=['properties','ru_id','accepted_taxon_name_id', 'taxon_name_id','reference_id', 'subtitle', 'type_specimens', 'ru_status'])
 
     # 因為前面誤用有調整accepted_taxon_name_id 所以在這邊調整回來
     total_df = total_df.drop(columns=['accepted_taxon_name_id', 'taxon_name_id', 'reference_id'])
@@ -2361,7 +2357,7 @@ def generate_checklist(request):
             # 還是先存入一個暫存的表 確定後再存入my_namespace_usage 匯入 or 選擇不匯入之後 再將這個暫時表的內容刪除
             # 在這邊整理要存入properties的欄位
             # 不管是什麼地位 學名都只保留一個
-            taxon_names = rows[['taxon_name_id','taxon_status','rank_id']].drop_duplicates().to_dict('records')
+            taxon_names = rows[['taxon_name_id','taxon_status','rank_id', 'nomenclature_id']].drop_duplicates().to_dict('records')
             for rrr in taxon_names:
                 # print(rrr.get('taxon_name_id'))
                 now_dict = {
@@ -2371,12 +2367,33 @@ def generate_checklist(request):
                     'rank_id': rrr.get('rank_id') # for後面排序用的
                 }
                 if rrr.get('taxon_status') == 'accepted':
+                    now_prop['indications'] = []
                     now_dict['properties'] = safe_json_dumps(now_prop)
                     now_dict['parent_taxon_name_id'] = parent_taxon_name_id
                     now_dict['per_usages'] = safe_json_dumps(per_usages)
                     now_dict['type_specimens'] = safe_json_dumps(type_specimens)
                 else:
-                    now_dict['properties'] = '{}'
+                    now_new_prop = {}
+                    now_indications = []
+                    # indications
+                    if rrr.get('taxon_status') == 'misapplied':
+                        if rrr.get('nomenclature_id') == 1: #動物
+                            now_indications = ['not of']
+                        elif rrr.get('nomenclature_id') == 2: #植物
+                            now_indications = ['auct. non']
+                    elif rrr.get('taxon_status') == 'not-accepted':
+                        merged_indications = []
+                        for pp in tmp_ru_df[(tmp_ru_df.ru_status == 'not-accepted') & (tmp_ru_df.taxon_name_id== rrr.get('taxon_name_id'))].properties.values:
+                            try:
+                                pp = json.loads(pp)
+                                if len(pp.get('indications')):
+                                    merged_indications += pp.get('indications')
+                            except:
+                                pass
+                        merged_indications = list(set(merged_indications))
+                        now_indications = [m for m in merged_indications if m != 'syn. nov.']
+                    now_new_prop['indications'] = now_indications
+                    now_dict['properties'] = safe_json_dumps(now_new_prop)
                     now_dict['parent_taxon_name_id'] = None
                     now_dict['per_usages'] = '[]'
                     now_dict['type_specimens'] = '[]'
@@ -2445,13 +2462,6 @@ def generate_checklist(request):
     final_usage_df = final_usage_df.reset_index(drop=True)
 
     final_usage_df['order'] = final_usage_df.index
-
-    # print('-----1-----')
-    # print(final_usages)
-    # print('-----2-----')
-    # print(accepted_usages)
-    # print('-----3-----')
-    # print(final_usage_df)
 
 
     group_keys = final_usage_df['tmp_taxon_id'].drop_duplicates().reset_index(drop=True)
