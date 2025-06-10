@@ -26,6 +26,7 @@ services:
     restart: always
     volumes:
       - ./scripts/nginx/production:/etc/nginx/conf.d
+      - ../tc-web-volumes/logs/nginx-api:/var/log/nginx
     networks:
       - traefik-api
     labels:
