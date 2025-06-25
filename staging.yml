@@ -34,3 +34,6 @@ services:
       - "traefik.http.routers.nginx-api.rule=Host(`api-staging.taicol.tw`)"
       - "traefik.http.routers.nginx-api.entrypoints=websecure"
       - "traefik.http.routers.nginx-api.tls.certresolver=myresolver"
+      - "traefik.http.routers.nginx-api.middlewares=ratelimit-api"
+      - "traefik.http.middlewares.ratelimit-api.ratelimit.average=8"
+      - "traefik.http.middlewares.ratelimit-api.ratelimit.burst=10"
