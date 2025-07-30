@@ -85,8 +85,6 @@ bio_group_map = {
     "Bacteria": "細菌",
     "Fungi": "真菌",
 }
-
-
 # is_in_taiwan 調整
 
 # reference_usages原始狀態
@@ -567,9 +565,8 @@ class ReferencesView(APIView):
                          JOIN api_citations c ON ru.reference_id = c.reference_id \
                          WHERE ru.taxon_name_id = %s AND r.type != 4 AND ru.status != '' \
                          AND ru.is_title != 1 AND ru.deleted_at IS NULL"  # 不給backbone
-                
                 with conn.cursor() as cursor:
-                    cursor.execute(query, (name_id,))
+                    cursor.execute(query, (int(name_id),))
                     df = pd.DataFrame(cursor.fetchall(), columns=['usage_id', 'name_id', 'reference_id', 'reference_type', 'publish_year', 'citation', 'usage_status', 'accepted_name_id', 'indications', 'is_in_taiwan', 'is_endemic', 'alien_type', 'is_deleted'])
             # usage反查時不排除backbone
             elif usage_id := request.GET.get('usage_id'):
@@ -611,23 +608,15 @@ class ReferencesView(APIView):
                 df['publish_year'] = df['publish_year'].fillna(0).astype(int).replace({0: None})
                 df['reference_id'] = df['reference_id'].fillna(0).astype(int).replace({0: None})
                 df['is_deleted'] = df['is_deleted'].apply(lambda x: True if x else False)
-                # is_list = ['is_endemic', 'is_in_taiwan']
                 df['is_endemic'] = df['is_endemic'].replace({0: False, 1: True, '0': False, '1': True})
                 df['is_in_taiwan'] = df['is_in_taiwan'].replace({0: False, 1: True, '0': False, '1': True, 2: None, '2': None, '': None})
-                for i in df.index:
-                    row = df.iloc[i]
-                    if row.indications and row.indications != '[]':
-                        df.loc[i, 'indications'] = ','.join(eval(row.indications))
-                    else:
-                        df.loc[i, 'indications'] = None
-                                
+                df['indications'] = df['indications'].apply(lambda x:  ','.join(eval(x)) if x and x !='[]' else None)
                 df = df.replace({np.nan: None, '': None})
                 df['reference_id'] = df['reference_id'].replace({np.nan: 0}).astype('int64').replace({0: None})
                 df['usage_id'] = df['usage_id'].replace({np.nan: 0}).astype('int64').replace({0: None})
                 df['accepted_name_id'] = df['accepted_name_id'].replace({np.nan: 0}).astype('int64').replace({0: None})
                 df = df.drop(columns=['reference_order'])
                 data = df.to_dict('records')
-
                 new_data = []
                 for d in data:
                     if not d.get('usage_id'):
@@ -2388,7 +2377,8 @@ def generate_checklist(request):
                                 pp = json.loads(pp)
                                 if len(pp.get('indications')):
                                     merged_indications += pp.get('indications')
-                            except:
+                            except Exception as e: 
+                                print('indications', e)
                                 pass
                         merged_indications = list(set(merged_indications))
                         now_indications = [m for m in merged_indications if m != 'syn. nov.']

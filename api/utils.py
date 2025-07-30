@@ -391,28 +391,46 @@ def get_whitelist(conn):
         
     conn = pymysql.connect(**db_settings)
 
-    # 1. 同模出現在不同分類群
-
-    query = "SELECT reference_usage_id FROM api_usage_whitelist WHERE whitelist_type = 1"
     with conn.cursor() as cursor:
+        query = "SELECT reference_usage_id FROM api_usage_check WHERE whitelist_type = 1"
         execute_line = cursor.execute(query)
+        # 1. 同模出現在不同分類群
         whitelist_list_1 = cursor.fetchall()
         whitelist_list_1 = [r[0] for r in whitelist_list_1]
-
-    # 2. 同學名出現在不同分類群
-
-    query = "SELECT taxon_name_id FROM api_usage_whitelist WHERE whitelist_type = 2"
-    with conn.cursor() as cursor:
+        # 2. 同學名出現在不同分類群
+        query = "SELECT taxon_name_id FROM api_usage_check WHERE whitelist_type = 2"
         execute_line = cursor.execute(query)
         whitelist_list_2 = cursor.fetchall()
         whitelist_list_2 = [r[0] for r in whitelist_list_2]
-
-    # 3. 一組 reference_id, accepted_taxon_name_id, taxon_name_id, 對到多個ru_id
-
-    query = "SELECT accepted_taxon_name_id, taxon_name_id, reference_id FROM api_usage_whitelist WHERE whitelist_type = 3"
-    with conn.cursor() as cursor:
+        # 3. 一組 reference_id, accepted_taxon_name_id, taxon_name_id, 對到多個ru_id
+        query = "SELECT accepted_taxon_name_id, taxon_name_id, reference_id FROM api_usage_check WHERE whitelist_type = 3"
         execute_line = cursor.execute(query)
         whitelist_list_3 = pd.DataFrame(cursor.fetchall(), columns=['accepted_taxon_name_id', 'taxon_name_id', 'reference_id'])
+
+
+
+    # 1. 同模出現在不同分類群
+
+    # query = "SELECT reference_usage_id FROM api_usage_whitelist WHERE whitelist_type = 1"
+    # with conn.cursor() as cursor:
+    #     execute_line = cursor.execute(query)
+    #     whitelist_list_1 = cursor.fetchall()
+    #     whitelist_list_1 = [r[0] for r in whitelist_list_1]
+
+    # # 2. 同學名出現在不同分類群
+
+    # query = "SELECT taxon_name_id FROM api_usage_whitelist WHERE whitelist_type = 2"
+    # with conn.cursor() as cursor:
+    #     execute_line = cursor.execute(query)
+    #     whitelist_list_2 = cursor.fetchall()
+    #     whitelist_list_2 = [r[0] for r in whitelist_list_2]
+
+    # # 3. 一組 reference_id, accepted_taxon_name_id, taxon_name_id, 對到多個ru_id
+
+    # query = "SELECT accepted_taxon_name_id, taxon_name_id, reference_id FROM api_usage_whitelist WHERE whitelist_type = 3"
+    # with conn.cursor() as cursor:
+    #     execute_line = cursor.execute(query)
+    #     whitelist_list_3 = pd.DataFrame(cursor.fetchall(), columns=['accepted_taxon_name_id', 'taxon_name_id', 'reference_id'])
 
     return whitelist_list_1, whitelist_list_2, whitelist_list_3
 
@@ -494,11 +512,11 @@ def check_taxon_usage():
 
     for row in rows_to_check.to_dict('records'):
         with conn.cursor() as cursor:
-            query = """INSERT INTO api_usage_check (reference_usage_id, autonym_group, object_group, error_type, updated_at) VALUES (%s, %s, %s, %s, %s)
+            query = """INSERT INTO api_usage_check (reference_usage_id, autonym_group, object_group, error_type, whitelist_type, updated_at) VALUES (%s, %s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE 
                             updated_at = %s;
                         """ 
-            execute_line = cursor.execute(query, (row.get('ru_id'), row.get('autonym_group'), row.get('object_group'), error_type, now, now))
+            execute_line = cursor.execute(query, (row.get('ru_id'), row.get('autonym_group'), row.get('object_group'), error_type, 1, now, now))
             conn.commit()
 
     # 3. autonym / 同模：同一篇文獻中有多個not-accepted在不同分類群。
@@ -527,11 +545,11 @@ def check_taxon_usage():
 
     for row in rows_to_check.to_dict('records'):
         with conn.cursor() as cursor:
-            query = """INSERT INTO api_usage_check (reference_usage_id, autonym_group, object_group, error_type, updated_at) VALUES (%s, %s, %s, %s, %s)
+            query = """INSERT INTO api_usage_check (reference_usage_id, autonym_group, object_group, error_type, whitelist_type, updated_at) VALUES (%s, %s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE 
                             updated_at = %s;
                         """ 
-            execute_line = cursor.execute(query, (row.get('ru_id'), row.get('autonym_group'), row.get('object_group'), error_type, now, now))
+            execute_line = cursor.execute(query, (row.get('ru_id'), row.get('autonym_group'), row.get('object_group'), error_type, 1, now, now))
             conn.commit()
 
 
@@ -555,11 +573,11 @@ def check_taxon_usage():
 
     for row in rows_to_check.to_dict('records'):
         with conn.cursor() as cursor:
-            query = """INSERT INTO api_usage_check (reference_usage_id, autonym_group, object_group, error_type, updated_at) VALUES (%s, %s, %s, %s, %s)
+            query = """INSERT INTO api_usage_check (reference_usage_id, autonym_group, object_group, error_type, whitelist_type, updated_at) VALUES (%s, %s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE 
                             updated_at = %s;
                         """ 
-            execute_line = cursor.execute(query, (row.get('ru_id'), row.get('autonym_group'), row.get('object_group'), error_type, now, now))
+            execute_line = cursor.execute(query, (row.get('ru_id'), row.get('autonym_group'), row.get('object_group'), error_type, 1, now, now))
             conn.commit()
 
 
@@ -582,11 +600,11 @@ def check_taxon_usage():
 
     for row in df_result.to_dict('records'):
         with conn.cursor() as cursor:
-            query = """INSERT INTO api_usage_check (accepted_taxon_name_id, taxon_name_id, reference_id, error_type, updated_at) VALUES (%s, %s, %s, %s, %s)
+            query = """INSERT INTO api_usage_check (accepted_taxon_name_id, taxon_name_id, reference_id, error_type, whitelist_type, updated_at) VALUES (%s, %s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE 
                             updated_at = %s;
                         """ 
-            execute_line = cursor.execute(query, (row.get('accepted_taxon_name_id'), row.get('taxon_name_id'), row.get('reference_id'), error_type, now, now))
+            execute_line = cursor.execute(query, (row.get('accepted_taxon_name_id'), row.get('taxon_name_id'), row.get('reference_id'), error_type, 3, now, now))
             conn.commit()
 
 
@@ -601,11 +619,11 @@ def check_taxon_usage():
 
     for row in b.to_dict('records'):
         with conn.cursor() as cursor:
-            query = """INSERT INTO api_usage_check (taxon_name_id, reference_id, error_type, updated_at) VALUES (%s, %s, %s, %s)
+            query = """INSERT INTO api_usage_check (taxon_name_id, reference_id, error_type, whitelist_type, updated_at) VALUES (%s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE 
                             updated_at = %s;
                         """ 
-            execute_line = cursor.execute(query, (row.get('taxon_name_id'), row.get('reference_id'), error_type, now, now))
+            execute_line = cursor.execute(query, (row.get('taxon_name_id'), row.get('reference_id'), error_type, 2, now, now))
             conn.commit()
 
 
@@ -664,15 +682,15 @@ def check_taxon_usage():
 
     for row in a.to_dict('records'):
         with conn.cursor() as cursor:
-            query = """INSERT INTO api_usage_check (taxon_name_id, reference_id, error_type, updated_at) VALUES (%s, %s, %s, %s)
+            query = """INSERT INTO api_usage_check (taxon_name_id, reference_id, error_type, whitelist_type, updated_at) VALUES (%s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE 
                             updated_at = %s;
                         """ 
-            execute_line = cursor.execute(query, (row.get('taxon_name_id'), row.get('reference_id'), error_type, now, now))
+            execute_line = cursor.execute(query, (row.get('taxon_name_id'), row.get('reference_id'), error_type, 2, now, now))
             conn.commit()
 
 
-    # 10. 一組 reference_id, accepted_taxon_name_id, taxon_name_id, 只對到一個ru_id
+    # 10. 一組 reference_id, accepted_taxon_name_id, taxon_name_id 對到多個ru_id
 
     error_type = 10
 
