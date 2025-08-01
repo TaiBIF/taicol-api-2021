@@ -940,6 +940,7 @@ class TaxonView(APIView):
                 df['updated_at'] = df.updated_at.apply(lambda x: x[0].split('T')[0])
 
                 # rank_id to rank
+                # print('hello')
                 df['rank'] = df['rank'].apply(lambda x: rank_map[int(x)])
 
                 
@@ -1115,8 +1116,8 @@ class NameView(APIView):
                 base_query = f"{base_query} WHERE tn.id = '{name_id}'"
                 count_query = f"{count_query} WHERE tn.id = '{name_id}'"
             elif scientific_name:  # 不考慮分類群, scientific_name, updated_at, created_at
-                base_query = f"{base_query} WHERE tn.search_name = '{remove_rank_char(scientific_name)}' OR tn.name = '{scientific_name}' "
-                count_query = f"{count_query}  WHERE tn.search_name = '{remove_rank_char(scientific_name)}' OR tn.name = '{scientific_name}' "
+                base_query = f"{base_query} WHERE (tn.search_name = '{remove_rank_char(scientific_name)}' OR tn.name = '{scientific_name}') "
+                count_query = f"{count_query}  WHERE (tn.search_name = '{remove_rank_char(scientific_name)}' OR tn.name = '{scientific_name}') "
                 for c in conditions:
                     base_query += " AND " + c
                     count_query += " AND " + c
@@ -1173,6 +1174,7 @@ class NameView(APIView):
                         query += f' AND {conditions[l]}'
                         count_query += f" AND {conditions[l]}"
                 # print('else: ', query)
+            print(base_query)
             with conn.cursor() as cursor:
                 query = f'WITH base_query AS ({base_query} ORDER BY tn.id LIMIT {limit} OFFSET {offset} ) {query}'  # 只處理限制筆數
                 cursor.execute(query)
@@ -1198,7 +1200,7 @@ class NameView(APIView):
                         # 這邊的namecode concat應該不會超過上限 維持原本寫法
                         query_hybrid_parent = f"SELECT GROUP_CONCAT( CONCAT(tn.name, ' ',tn.formatted_authors) SEPARATOR ' × ' ) FROM taxon_name_hybrid_parent AS tnhp \
                                                 JOIN taxon_names AS tn ON tn.id = tnhp.parent_taxon_name_id \
-                                                WHERE tnhp.taxon_name_id = {df.loc[h]['name_id']} \
+                                                WHERE tnhp.taxon_name_id = {df.loc[h]['name_id']} AND tn.is_publish = 1 \
                                                 GROUP BY tnhp.taxon_name_id"
                         with conn.cursor() as cursor:
                             cursor.execute(query_hybrid_parent)
