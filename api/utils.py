@@ -388,9 +388,7 @@ def get_conditioned_solr_search(req):
 
 
 def get_whitelist(conn):
-        
     conn = pymysql.connect(**db_settings)
-
     with conn.cursor() as cursor:
         query = "SELECT reference_usage_id FROM api_usage_check WHERE whitelist_type = 1"
         execute_line = cursor.execute(query)
@@ -406,32 +404,6 @@ def get_whitelist(conn):
         query = "SELECT accepted_taxon_name_id, taxon_name_id, reference_id FROM api_usage_check WHERE whitelist_type = 3"
         execute_line = cursor.execute(query)
         whitelist_list_3 = pd.DataFrame(cursor.fetchall(), columns=['accepted_taxon_name_id', 'taxon_name_id', 'reference_id'])
-
-
-
-    # 1. 同模出現在不同分類群
-
-    # query = "SELECT reference_usage_id FROM api_usage_whitelist WHERE whitelist_type = 1"
-    # with conn.cursor() as cursor:
-    #     execute_line = cursor.execute(query)
-    #     whitelist_list_1 = cursor.fetchall()
-    #     whitelist_list_1 = [r[0] for r in whitelist_list_1]
-
-    # # 2. 同學名出現在不同分類群
-
-    # query = "SELECT taxon_name_id FROM api_usage_whitelist WHERE whitelist_type = 2"
-    # with conn.cursor() as cursor:
-    #     execute_line = cursor.execute(query)
-    #     whitelist_list_2 = cursor.fetchall()
-    #     whitelist_list_2 = [r[0] for r in whitelist_list_2]
-
-    # # 3. 一組 reference_id, accepted_taxon_name_id, taxon_name_id, 對到多個ru_id
-
-    # query = "SELECT accepted_taxon_name_id, taxon_name_id, reference_id FROM api_usage_whitelist WHERE whitelist_type = 3"
-    # with conn.cursor() as cursor:
-    #     execute_line = cursor.execute(query)
-    #     whitelist_list_3 = pd.DataFrame(cursor.fetchall(), columns=['accepted_taxon_name_id', 'taxon_name_id', 'reference_id'])
-
     return whitelist_list_1, whitelist_list_2, whitelist_list_3
 
 
@@ -458,7 +430,6 @@ def check_taxon_usage():
         ref_group_pair_total = cursor.fetchall()
         ref_group_pair_total = pd.DataFrame(ref_group_pair_total, columns=['ru_id', 'ru_status', 'accepted_taxon_name_id', 'taxon_name_id', 'reference_id',
                                                                         'object_group', 'autonym_group', 'check_list_type'])
-        # ref_group_pair_total = ref_group_pair_total.replace({np.nan:None}) 
         ref_group_pair_total = ref_group_pair_total[ref_group_pair_total.check_list_type != 4] # !=4 寫在query裡會排除掉null
         # 排除reference_id = 95
         ref_group_pair_total = ref_group_pair_total[ref_group_pair_total.reference_id!=95]
@@ -512,7 +483,7 @@ def check_taxon_usage():
 
     for row in rows_to_check.to_dict('records'):
         with conn.cursor() as cursor:
-            query = """INSERT INTO api_usage_check (reference_usage_id, autonym_group, object_group, error_type, whitelist_type, updated_at) VALUES (%s, %s, %s, %s, %s)
+            query = """INSERT INTO api_usage_check (reference_usage_id, autonym_group, object_group, error_type, whitelist_type, updated_at) VALUES (%s, %s, %s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE 
                             updated_at = %s;
                         """ 
@@ -545,7 +516,7 @@ def check_taxon_usage():
 
     for row in rows_to_check.to_dict('records'):
         with conn.cursor() as cursor:
-            query = """INSERT INTO api_usage_check (reference_usage_id, autonym_group, object_group, error_type, whitelist_type, updated_at) VALUES (%s, %s, %s, %s, %s)
+            query = """INSERT INTO api_usage_check (reference_usage_id, autonym_group, object_group, error_type, whitelist_type, updated_at) VALUES (%s, %s, %s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE 
                             updated_at = %s;
                         """ 
@@ -556,7 +527,6 @@ def check_taxon_usage():
     # 4. 同模（不包含autonym）：同一篇文獻中多個accepted
 
     error_type = 4
-
 
     check_obj_data = ref_group_pair_total[(~ref_group_pair_total.ru_id.isin(whitelist_list_1))&(ref_group_pair_total.autonym_group.isnull())&(ref_group_pair_total.object_group.notnull())&(ref_group_pair_total.ru_status=='accepted')][['object_group','taxon_name_id','reference_id']].drop_duplicates().groupby(['reference_id','object_group'],as_index=False).nunique()
     check_obj_data_list = check_obj_data[check_obj_data.taxon_name_id>1].to_dict('records')
@@ -573,7 +543,7 @@ def check_taxon_usage():
 
     for row in rows_to_check.to_dict('records'):
         with conn.cursor() as cursor:
-            query = """INSERT INTO api_usage_check (reference_usage_id, autonym_group, object_group, error_type, whitelist_type, updated_at) VALUES (%s, %s, %s, %s, %s)
+            query = """INSERT INTO api_usage_check (reference_usage_id, autonym_group, object_group, error_type, whitelist_type, updated_at) VALUES (%s, %s, %s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE 
                             updated_at = %s;
                         """ 
@@ -600,7 +570,7 @@ def check_taxon_usage():
 
     for row in df_result.to_dict('records'):
         with conn.cursor() as cursor:
-            query = """INSERT INTO api_usage_check (accepted_taxon_name_id, taxon_name_id, reference_id, error_type, whitelist_type, updated_at) VALUES (%s, %s, %s, %s, %s)
+            query = """INSERT INTO api_usage_check (accepted_taxon_name_id, taxon_name_id, reference_id, error_type, whitelist_type, updated_at) VALUES (%s, %s, %s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE 
                             updated_at = %s;
                         """ 
@@ -619,7 +589,7 @@ def check_taxon_usage():
 
     for row in b.to_dict('records'):
         with conn.cursor() as cursor:
-            query = """INSERT INTO api_usage_check (taxon_name_id, reference_id, error_type, whitelist_type, updated_at) VALUES (%s, %s, %s, %s)
+            query = """INSERT INTO api_usage_check (taxon_name_id, reference_id, error_type, whitelist_type, updated_at) VALUES (%s, %s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE 
                             updated_at = %s;
                         """ 
@@ -682,7 +652,7 @@ def check_taxon_usage():
 
     for row in a.to_dict('records'):
         with conn.cursor() as cursor:
-            query = """INSERT INTO api_usage_check (taxon_name_id, reference_id, error_type, whitelist_type, updated_at) VALUES (%s, %s, %s, %s)
+            query = """INSERT INTO api_usage_check (taxon_name_id, reference_id, error_type, whitelist_type, updated_at) VALUES (%s, %s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE 
                             updated_at = %s;
                         """ 
