@@ -54,6 +54,9 @@ api_patterns = [
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('update_solr', api_view.update_solr, name='update_solr'),
+    path('update/name', api_view.update_name, name='update_name'),
+    path('update/reference', api_view.update_reference, name='update_reference'),
     path('v2/', include(api_patterns)),  # 有 /v2/ 的版本
     path('', include(api_patterns)),    # 沒有 /v2/ 的版本
     re_path(r'^swagger(?P<format>\.json|\.yaml)$', schema_view.without_ui(cache_timeout=0), name='schema-json'),

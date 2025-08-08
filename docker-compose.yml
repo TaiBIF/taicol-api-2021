@@ -7,6 +7,7 @@ services:
     volumes:
       - .:/code
       - ../taicol-volumes/static:/code/conf/static
+      - ../tc-web-volumes/solr:/var/solr
     ports:
       - 8005:8005
     env_file:

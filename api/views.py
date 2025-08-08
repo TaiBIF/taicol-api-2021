@@ -1,7 +1,7 @@
 
 # from django.shortcuts import render
 from django.http import (
-    # JsonResponse,
+    JsonResponse,
     # HttpResponseRedirect,
     # Http404,
     HttpResponse,
@@ -2480,3 +2480,262 @@ def generate_checklist(request):
     # 回傳tmp_checklist_id給工具 工具再用這個id回傳usage給工具前端
 
     return HttpResponse(json.dumps({'tmp_checklist_id': tmp_checklist_id}))
+
+
+def get_bearer_token(request):
+    """從 request 中提取 Bearer token"""
+    auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+    if not auth_header.startswith('Bearer '):
+        return None
+    return auth_header.split(' ')[1]
+
+def is_valid_token(token):
+    """驗證 token 是否有效"""
+    return token == env('SOLR_UPDATE_TOKEN')
+
+
+
+from api.update._03_update_solr import BatchOptimizedSolrTaxonUpdater
+
+import time
+
+# 新的批次更新 API
+def update_solr(request):
+    """
+    批次更新 Solr API
+    支援多個 taxon_id 的批次更新
+    """
+    # 驗證 Bearer token
+    token = get_bearer_token(request)
+    if not token or not is_valid_token(token):
+        return JsonResponse({'status': 'token error'}, status=401)
+    
+    # 獲取參數
+    update_type = request.GET.get('update_type', 'full')
+    taxon_ids_param = request.GET.get('taxon_ids', '')
+    
+    if not taxon_ids_param:
+        return JsonResponse({'status': 'missing taxon_ids'}, status=400)
+    
+    # 解析 taxon_ids
+    try:
+        taxon_ids = [tid.strip() for tid in taxon_ids_param.split(',') if tid.strip()]
+    except Exception as e:
+        return JsonResponse({'status': 'invalid taxon_ids format'}, status=400)
+    
+    if not taxon_ids:
+        return JsonResponse({'status': 'empty taxon_ids'}, status=400)
+    
+    start_time = time.time()
+    
+    try:
+        if update_type == 'full':
+            result = handle_batch_full_update(taxon_ids)
+        elif update_type == 'partial':
+            result = handle_batch_partial_update(taxon_ids)
+        else:
+            return JsonResponse({'status': 'invalid update_type'}, status=400)
+        
+        elapsed_time = time.time() - start_time
+        
+        if result.status_code == 200:
+            response_data = json.loads(result.content)
+            response_data['processing_time'] = f"{elapsed_time:.2f}s"
+            response_data['batch_size'] = len(taxon_ids)
+            return JsonResponse(response_data)
+        
+        return result
+        
+    except Exception as e:
+        print(f"批次更新失敗: {e}")
+        return JsonResponse({
+            'status': 'failed',
+            'error': str(e),
+            'processing_time': f"{time.time() - start_time:.2f}s",
+            'batch_size': len(taxon_ids)
+        }, status=500)
+
+
+def handle_batch_full_update(taxon_ids: List[str]):
+    """處理批次完整更新"""
+    conn = None
+    try:
+        conn = pymysql.connect(**db_settings)
+        
+        # 查詢所有 taxon_id 的資料
+        placeholders = ','.join(['%s'] * len(taxon_ids))
+        query = f"SELECT taxon_id, content FROM api_for_solr WHERE taxon_id IN ({placeholders})"
+        
+        taxon_data_map = {}
+        
+        with conn.cursor() as cursor:
+            cursor.execute(query, taxon_ids)
+            results = cursor.fetchall()
+            
+            for taxon_id, content in results:
+                try:
+                    solr_documents = json.loads(content)
+                    taxon_data_map[taxon_id] = solr_documents
+                except json.JSONDecodeError as e:
+                    print(f"JSON 解析失敗: {taxon_id}, {e}")
+                    continue
+        
+        if not taxon_data_map:
+            return JsonResponse({'status': 'no data found'})
+        
+        # 建立批次更新器
+        updater = BatchOptimizedSolrTaxonUpdater(
+            solr_base_url=os.environ.get('SOLR_PREFIX', 'http://localhost:8983/solr'),
+            core_name='taxa'
+        )
+        
+        # 執行批次完整替換
+        success = updater.batch_full_replace_by_taxon_ids(taxon_data_map)
+        
+        if success:
+            # 清理資料庫中的臨時資料
+            with conn.cursor() as cursor:
+                cursor.execute(f"DELETE FROM api_for_solr WHERE taxon_id IN ({placeholders})", taxon_ids)
+                conn.commit()
+            
+            stats = updater.get_stats()
+            
+            return JsonResponse({
+                'status': 'success',
+                'update_type': 'batch_full',
+                'processed_taxon_ids': list(taxon_data_map.keys()),
+                'total_documents': sum(len(docs) if isinstance(docs, list) else 1 for docs in taxon_data_map.values()),
+                'stats': stats
+            })
+        else:
+            return JsonResponse({
+                'status': 'failed',
+                'error': 'batch_full_update_failed',
+                'processed_taxon_ids': list(taxon_data_map.keys())
+            })
+            
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        return JsonResponse({'status': 'failed', 'error': str(e)})
+    finally:
+        if conn:
+            conn.close()
+
+
+def handle_batch_partial_update(taxon_ids: List[str]):
+    """處理批次部分更新"""
+    conn = None
+    try:
+        conn = pymysql.connect(**db_settings)
+        
+        # 查詢所有 taxon_id 的更新資料
+        placeholders = ','.join(['%s'] * len(taxon_ids))
+        query = f"SELECT taxon_id, content, updated_at FROM api_for_solr WHERE taxon_id IN ({placeholders})"
+        
+        taxon_updates_map = {}
+        
+        with conn.cursor() as cursor:
+            cursor.execute(query, taxon_ids)
+            results = cursor.fetchall()
+            
+            for taxon_id, content, updated_at in results:
+                try:
+                    update_fields = json.loads(content)
+                    # 添加更新時間
+                    update_fields['updated_at'] = updated_at.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+                    taxon_updates_map[taxon_id] = update_fields
+                except json.JSONDecodeError as e:
+                    print(f"JSON 解析失敗: {taxon_id}, {e}")
+                    continue
+        
+        if not taxon_updates_map:
+            return JsonResponse({'status': 'no data found'})
+        
+        # 建立批次更新器
+        updater = BatchOptimizedSolrTaxonUpdater(
+            solr_base_url=os.environ.get('SOLR_PREFIX', 'http://localhost:8983/solr'),
+            core_name='taxa'
+        )
+        
+        # 執行批次部分更新
+        success = updater.batch_partial_update_by_taxon_ids(taxon_updates_map)
+        
+        if success:
+            # 清理資料庫
+            with conn.cursor() as cursor:
+                cursor.execute(f"DELETE FROM api_for_solr WHERE taxon_id IN ({placeholders})", taxon_ids)
+                conn.commit()
+            
+            return JsonResponse({
+                'status': 'success',
+                'update_type': 'batch_partial',
+                'processed_taxon_ids': list(taxon_updates_map.keys()),
+                'updated_fields': {tid: list(fields.keys()) for tid, fields in taxon_updates_map.items()}
+            })
+        else:
+            return JsonResponse({
+                'status': 'failed',
+                'error': 'batch_partial_update_failed',
+                'processed_taxon_ids': list(taxon_updates_map.keys())
+            })
+            
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        return JsonResponse({'status': 'failed', 'error': str(e)})
+    finally:
+        if conn:
+            conn.close()
+
+
+
+def update_name(request):
+    from api.update._02_update_name import TaxonomicNameUpdater
+    
+    # 定義參數映射
+    param_mappings = {
+        'name_id': lambda x: {'taxon_name_ids': [int(x)]},
+        'person_id': lambda x: {'person_ids': [int(x)]},
+        'min_taxon_name_id': lambda x: {'min_taxon_name_id': int(x)},
+        'hybrid_name_id': lambda x: {'hybrid_name_ids': [int(x)]},
+    }
+    
+    # 找到第一個存在的參數
+    for param_name, param_converter in param_mappings.items():
+        if param_value := request.GET.get(param_name):
+            try:
+                with TaxonomicNameUpdater(batch_size=10, max_retries=3) as updater:
+                    kwargs = param_converter(param_value)
+                    updater.run_update(**kwargs)
+                return JsonResponse({'status': 'success'})
+            except Exception:
+                return JsonResponse({'status': 'failed'})
+    
+    # 如果沒有找到任何參數
+    return JsonResponse({'status': 'no_params', 'error': 'No valid parameters provided'})
+
+
+def update_reference(request):
+    from api.update._01_update_ref import CitationUpdater
+    
+    # 定義參數映射
+    param_mappings = {
+        'reference_id': lambda x: {'reference_ids': [int(x)]},
+        'person_id': lambda x: {'person_ids': [int(x)]},
+        'min_reference_id': lambda x: {'min_reference_id': int(x)},
+    }
+    
+    # 找到第一個存在的參數
+    for param_name, param_converter in param_mappings.items():
+        if param_value := request.GET.get(param_name):
+            try:
+                with CitationUpdater(batch_size=10, max_retries=3) as updater:
+                    kwargs = param_converter(param_value)
+                    updater.run_update(**kwargs)
+                return JsonResponse({'status': 'success'})
+            except Exception:
+                return JsonResponse({'status': 'failed'})
+    
+    # 如果沒有找到任何參數
+    return JsonResponse({'status': 'error', 'message': 'No valid parameters provided'})

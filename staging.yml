@@ -13,6 +13,7 @@ services:
     volumes:
       - .:/code
       - ../taicol-volumes/static:/code/conf/static
+      - ../tc-web-volumes/solr:/var/solr
     expose:
       - 8002
     env_file:
