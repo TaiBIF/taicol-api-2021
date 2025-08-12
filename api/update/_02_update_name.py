@@ -75,7 +75,8 @@ class TaxonomicNameUpdater(DatabaseManager):
                    tn.properties ->> '$.species_layers' as species_layers,
                    tn.properties ->> '$.species_id' as species_id,
                    tn.properties ->> '$.initial_year' as initial_year,
-                   tn.properties ->> '$.is_approved_list' as is_approved_list
+                   tn.properties ->> '$.is_approved_list' as is_approved_list,
+                    tn.properties ->> '$.genus_taxon_name_id' as genus_taxon_name_id
             FROM taxon_names tn
             WHERE tn.rank_id <> 47 AND tn.deleted_at IS NULL AND tn.is_publish = 1
         """
@@ -150,7 +151,7 @@ class TaxonomicNameUpdater(DatabaseManager):
         columns = ['taxon_name_id', 'rank_id', 'nomenclature_id', 'name',
                   'original_taxon_name_id', 'formatted_authors', 'publish_year', 'authors_name',
                   'latin_name', 'latin_genus', 'latin_s1', 'is_hybrid', 'species_layers', 
-                  'species_id', 'initial_year', 'is_approved_list']
+                  'species_id', 'initial_year', 'is_approved_list', 'genus_taxon_name_id']
         
         df = pd.DataFrame(results, columns=columns).replace({np.nan: None})
         
@@ -171,6 +172,7 @@ class TaxonomicNameUpdater(DatabaseManager):
             )
             
             # 轉換數字欄位
+            df['genus_taxon_name_id'] = pd.to_numeric(df['genus_taxon_name_id'], errors='coerce')
             df['species_id'] = pd.to_numeric(df['species_id'], errors='coerce')
             df['initial_year'] = pd.to_numeric(df['initial_year'], errors='coerce')
         
@@ -187,7 +189,8 @@ class TaxonomicNameUpdater(DatabaseManager):
         is_hybrid = row['is_hybrid']
         species_layers = row['species_layers'] or []
         species_id = row['species_id']
-        
+        genus_taxon_name_id = row['genus_taxon_name_id']
+
         # 屬以上
         if rank_id < 30 or (rank_id > 47 and rank_id <= 50):
             if nomenclature_id in [3, 4]:  # 細菌、古菌或病毒
@@ -195,13 +198,27 @@ class TaxonomicNameUpdater(DatabaseManager):
             else:
                 return latin_name or ''
         
-        # 屬 / 亞屬 / 組 / 亞組
-        elif rank_id in [30, 31, 32, 33]:
+        # 屬 
+        elif rank_id == 30:            
             if nomenclature_id == 2 and is_hybrid:  # 植物雜交
                 return f"× <i>{latin_name or ''}</i>"
             else:
                 return f"<i>{latin_name or ''}</i>"
-        
+            
+        # 亞屬 / 組 / 亞組
+        elif rank_id in [31, 32, 33]:
+            if nomenclature_id == 2 and genus_taxon_name_id:
+                names = name.split(' ')
+                final_names = []
+                for nn in names:
+                    if nn in ['subgen.', 'sect.', 'subsect.']:
+                        final_names.append(nn)
+                    else:
+                        final_names.append(f"<i>{nn}</i>")
+                return f"{(' '.join(final_names))}"
+            else:
+                return f"<i>{latin_name or ''}</i>"
+            
         # 種
         elif rank_id == 34:
             if nomenclature_id == 2 and is_hybrid:  # 植物雜交
@@ -228,12 +245,21 @@ class TaxonomicNameUpdater(DatabaseManager):
             
             for count, layer in enumerate(species_layers):
                 if count == 0:  # 種下rank不顯示
+
+                    # 種下階層若為subsp.不用顯示，subsp.以外的種下階層需要顯示。(2025/8加入)
+                    if not layer.get('rank_abbreviation') or layer.get('rank_abbreviation') == 'subsp.':
+                        s2_rank = ''
+                    else:
+                        s2_rank = layer.get('rank_abbreviation') + ' '
+
                     if latin_genus and latin_s1:
-                        formatted_name = f"<i>{latin_genus} {latin_s1} {layer.get('latin_name', '')}</i>"
+                        formatted_name = f"<i>{latin_genus} {latin_s1} {s2_rank}{layer.get('latin_name', '')}</i>"
+
                     elif species_id:
                         # 需要查詢 species 資訊
                         species_prop = self._get_species_properties(species_id)
-                        formatted_name = f"<i>{species_prop.get('latin_genus', '')} {species_prop.get('latin_s1', '')} {layer.get('latin_name', '')}</i>"
+                        formatted_name = f"<i>{species_prop.get('latin_genus', '')} {species_prop.get('latin_s1', '')} {s2_rank}{layer.get('latin_name', '')}</i>"
+
                     else:
                         formatted_name = name
                 else:  # 種下下rank需顯示
