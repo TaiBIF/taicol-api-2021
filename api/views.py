@@ -1370,12 +1370,15 @@ def get_taxon_by_higher(request):
 def generate_checklist(request):
 
     data = json.loads(request.body)
-    pairs = list({(item['reference_id'], item['group']) for item in data})
+    pairs = list({(item['reference_id'], item['group']) for item in data['usages']})
+    exclude_cultured = data['exclude_cultured']
+    only_in_taiwan = data['only_in_taiwan']
+    references = data['references']
 
     from api.services._04_generate_checklist import process_taxon_checklist
 
     s = time.time()
-    final_usage_df, tmp_checklist_id = process_taxon_checklist(pairs)
+    final_usage_df, tmp_checklist_id = process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references)
     print(time.time()-s)
     db_string = 'mysql+pymysql://{}:{}@{}:{}/{}'.format(db_settings.get('user'), db_settings.get('password'), db_settings.get('host'), db_settings.get('port'), db_settings.get('db'))
     db = create_engine(db_string)
@@ -1390,7 +1393,6 @@ def generate_checklist(request):
     # 回傳tmp_checklist_id給工具 工具再用這個id回傳usage給工具前端
 
     return HttpResponse(json.dumps({'tmp_checklist_id': tmp_checklist_id}))
-
 
 
 def get_bearer_token(request):

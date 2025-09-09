@@ -13,7 +13,8 @@ import time
 
 
 
-def process_taxon_checklist(pairs):
+
+def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references):
 
     # conn = get_conn()
 
@@ -25,7 +26,7 @@ def process_taxon_checklist(pairs):
     # 應該先判斷是不是有 accepted_taxon_name_id & taxon_name_id & reference_id 對應的usage需要被刪除
     check_deleted_usages()
 
-    ref_df, usage_df, common_name_rus = get_dfs(pairs) 
+    ref_df, usage_df, common_name_rus = get_dfs(pairs, exclude_cultured, only_in_taiwan) 
     usage_df = assign_group_and_tmp_taxon_ids(usage_df) # 初步分群
 
     total_df = usage_df
@@ -180,7 +181,6 @@ def process_taxon_checklist(pairs):
 
     # 處理上階層被合併在一起 但不是最新接受名的情況
 
-    not_2_layer=[]
     loop_count = 0
 
     while len(parent_not_accepted):
@@ -191,9 +191,6 @@ def process_taxon_checklist(pairs):
             # 有可能兩個都是種下 用max_layer_count來判斷誰是下階層
             rows_latest = rows[(rows.ru_status=='accepted')&(rows.is_latest==True)&(rows.rank_id.isin(sub_lin_ranks))]
             max_layer_count = rows_latest.layer_count.max()
-            # 需要確認是不是只差一層 可能會有不是差一層的 但還是需要拆開
-            if not len(rows.layer_count.unique()) == 2 or not (rows.layer_count.max()-rows.layer_count.min()==1):
-                not_2_layer.append(s)
             # 2024-12 這邊直接改成按照階層分
             # 給予下階層新的tmp_taxon_id
             new_tmp_taxon_id = total_df.tmp_taxon_id.max() + 1
@@ -417,6 +414,7 @@ def process_taxon_checklist(pairs):
         name_query = 'SELECT id, reference_id, `name` FROM taxon_names WHERE id IN %s'
         cursor.execute(name_query, (total_df.taxon_name_id.unique().tolist(),))
         name_df = pd.DataFrame(cursor.fetchall(), columns=['taxon_name_id', 'name_reference_id', 'name'])
+        name_df = name_df.replace({np.nan: None})
         # tmp_checklist_id
         query = '''SELECT max(tmp_checklist_id) from tmp_namespace_usages;'''
         execute_line = cursor.execute(query)
@@ -493,7 +491,7 @@ def process_taxon_checklist(pairs):
                     now_prop['indications'] = []
                     now_dict['properties'] = safe_json_dumps(now_prop)
                     now_dict['parent_taxon_name_id'] = parent_taxon_name_id
-                    now_dict['per_usages'] = safe_json_dumps(get_per_usages(rrr.get('taxon_name_id'), rows, prop_df_, name_df, ref_df, conn, backbone_ref_ids))
+                    now_dict['per_usages'] = safe_json_dumps(get_per_usages(rrr.get('taxon_name_id'), rows, prop_df_, name_df, ref_df, conn, backbone_ref_ids, references))
                     now_dict['type_specimens'] = safe_json_dumps(type_specimens)
                 else:
                     now_new_prop = {}
@@ -515,7 +513,7 @@ def process_taxon_checklist(pairs):
                     now_new_prop['indications'] = now_indications
                     now_dict['properties'] = safe_json_dumps(now_new_prop)
                     now_dict['parent_taxon_name_id'] = None
-                    now_dict['per_usages'] = safe_json_dumps(get_per_usages(rrr.get('taxon_name_id'), rows, prop_df_, name_df, ref_df, conn, backbone_ref_ids))
+                    now_dict['per_usages'] = safe_json_dumps(get_per_usages(rrr.get('taxon_name_id'), rows, prop_df_, name_df, ref_df, conn, backbone_ref_ids, references))
                     now_dict['type_specimens'] = '[]'
                 final_usages.append(now_dict)
         except Exception as e: 

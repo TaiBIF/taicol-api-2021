@@ -7,22 +7,13 @@ import time
 from api.services.utils.common import *
 
 
-def get_dfs(pairs): # 更新資料前處理
+def get_dfs(pairs, exclude_cultured, only_in_taiwan): # 更新資料前處理
     conn = get_conn()
     with conn.cursor() as cursor:
         placeholders = ",".join(["(%s, %s)"] * len(pairs))
         params = [item for pair in pairs for item in pair]
-        ref_pairs = [p[0] for p in pairs]
-        query = '''SELECT r.id, r.publish_year, JSON_EXTRACT(r.properties, "$.doi"), 
-                        r.`type`, ac.publish_date, JSON_EXTRACT(r.properties, "$.book_title"), 
-                        JSON_EXTRACT(r.properties, "$.volume"), JSON_EXTRACT(r.properties, "$.issue") 
-                    FROM `references` r 
-                    LEFT JOIN api_citations ac ON ac.reference_id = r.id
-                    WHERE r.is_publish = 1 AND r.id IN %s
-                    '''
-        execute_line = cursor.execute(query, (ref_pairs,))
-        ref_df = pd.DataFrame(cursor.fetchall(), columns=['reference_id', 'publish_year', 'doi', 'type', 'publish_date', 'book_title', 'volume', 'issue'])
         # 排除俗名backbone 及 個人建立名錄
+        # 基本查詢
         query = f'''
             SELECT 
                 ru.id,
@@ -45,6 +36,15 @@ def get_dfs(pairs): # 更新資料前處理
                 AND r.id != 95
             JOIN taxon_names tn
                 ON tn.id = ru.taxon_name_id
+        '''
+        
+        # 如果需要 only_in_taiwan 判斷，需要加入 ranks 表
+        if only_in_taiwan == 'yes':
+            query += '''
+            JOIN ranks rk ON rk.id = tn.rank_id
+            '''
+        
+        query += f'''
             LEFT JOIN api_taxon_usages atu 
                 ON atu.is_deleted = 0 
                 AND atu.reference_id = ru.reference_id
@@ -59,7 +59,71 @@ def get_dfs(pairs): # 更新資料前處理
                     OR r.properties ->> '$.check_list_type' != '4'
                 )
                 AND (ru.reference_id, ru.`group`) IN ({placeholders})
+        '''
+        
+        # 加入 only_in_taiwan 條件
+        if only_in_taiwan == 'yes':
+            # 先取得 species 的 order 值
+            cursor.execute("SELECT `order` FROM ranks WHERE `key` = 'species'")
+            species_order_result = cursor.fetchone()
+            species_order = species_order_result[0] if species_order_result else None
+            
+            if species_order is not None:
+                query += '''
+                    AND (
+                        (rk.order >= %s AND ru.properties ->> '$.is_in_taiwan' != '0')
+                        OR rk.order < %s
+                    )
+                '''
+                params.extend([species_order, species_order])
+        
+        # 加入 exclude_cultured 條件
+        if exclude_cultured == 'yes':
+            query += '''
+                AND (
+                    JSON_UNQUOTE(JSON_EXTRACT(ru.properties, '$.alien_type')) != 'cultured'
+                    OR JSON_EXTRACT(ru.properties, '$.alien_type') IS NULL
+                )
             '''
+
+
+        # query = f'''
+        #     SELECT 
+        #         ru.id,
+        #         ru.reference_id,
+        #         ru.taxon_name_id,
+        #         ru.accepted_taxon_name_id,
+        #         ru.status,
+        #         ru.per_usages,
+        #         ru.properties ->> '$.is_in_taiwan',
+        #         ru.parent_taxon_name_id,
+        #         ru.`group`,
+        #         tn.rank_id, 
+        #         tn.nomenclature_id, 
+        #         tn.object_group, 
+        #         tn.autonym_group,
+        #         JSON_LENGTH(tn.properties ->> '$.species_layers')
+        #     FROM reference_usages ru
+        #     JOIN `references` r 
+        #         ON r.id = ru.reference_id 
+        #         AND r.id != 95
+        #     JOIN taxon_names tn
+        #         ON tn.id = ru.taxon_name_id
+        #     LEFT JOIN api_taxon_usages atu 
+        #         ON atu.is_deleted = 0 
+        #         AND atu.reference_id = ru.reference_id
+        #         AND atu.accepted_taxon_name_id = ru.accepted_taxon_name_id
+        #         AND atu.taxon_name_id = ru.taxon_name_id
+        #     WHERE ru.is_title != 1 
+        #         AND ru.status NOT IN ("", "undetermined") 
+        #         AND ru.deleted_at IS NULL 
+        #         AND ru.accepted_taxon_name_id IS NOT NULL 
+        #         AND (
+        #             JSON_EXTRACT(r.properties, '$.check_list_type') IS NULL 
+        #             OR r.properties ->> '$.check_list_type' != '4'
+        #         )
+        #         AND (ru.reference_id, ru.`group`) IN ({placeholders})
+        #     '''
         execute_line = cursor.execute(query, params)
         usage_data = cursor.fetchall()
         usage_df = pd.DataFrame(usage_data, columns=['ru_id', 'reference_id', 'taxon_name_id', 'accepted_taxon_name_id', 
@@ -79,6 +143,15 @@ def get_dfs(pairs): # 更新資料前處理
             '''
         cursor.execute(ref_95_query, (list(usage_df.taxon_name_id.unique()),))
         common_name_rus = [row[0] for row in cursor.fetchall()]
+        query = '''SELECT r.id, r.publish_year, JSON_EXTRACT(r.properties, "$.doi"), 
+                        r.`type`, ac.publish_date, JSON_EXTRACT(r.properties, "$.book_title"), 
+                        JSON_EXTRACT(r.properties, "$.volume"), JSON_EXTRACT(r.properties, "$.issue") 
+                    FROM `references` r 
+                    LEFT JOIN api_citations ac ON ac.reference_id = r.id
+                    WHERE r.is_publish = 1 AND r.id IN %s
+                    '''
+        execute_line = cursor.execute(query, (usage_df.reference_id.unique().tolist(),))
+        ref_df = pd.DataFrame(cursor.fetchall(), columns=['reference_id', 'publish_year', 'doi', 'type', 'publish_date', 'book_title', 'volume', 'issue'])
     ref_df = ref_df.where(pd.notnull(ref_df), None)
     ref_df['publish_date'] = ref_df['publish_date'].fillna('')
     ref_df['publish_year'] = ref_df['publish_year'].apply(int)
@@ -325,8 +398,9 @@ def determine_taxon_status(df):
     # 為每個 tmp_taxon_id 建立 accepted_name_id
     accepted_mask = (df['ru_status'] == 'accepted') & (df['is_latest'] == 1)
     df['accepted_name_id'] = df[accepted_mask].groupby('tmp_taxon_id')['taxon_name_id'].transform('first')
-    # df['accepted_name_id'] = df.groupby('tmp_taxon_id')['accepted_name_id'].transform(lambda x: x.fillna(method='ffill').fillna(method='bfill'))
-    df['accepted_name_id'] = df.groupby('tmp_taxon_id')['accepted_name_id'].ffill().bfill()
+    df['accepted_name_id'] = df.groupby('tmp_taxon_id')['accepted_name_id'].transform(
+        lambda x: x.ffill().bfill()
+    )
    # 建立 not_accepted 標記
     not_accepted_mask = (df['ru_status'] == 'not-accepted') & (df['is_latest'] == 1)
     df['is_not_accepted'] = not_accepted_mask
@@ -686,7 +760,7 @@ def determine_taxon_prop(df):
         grouped = common_name_data.groupby('tmp_taxon_id')
         for tmp_taxon_id, group_data in grouped:
             group_data = group_data.sort_values(['is_latest_accepted', 'ru_order'], 
-                                              ascending=[False, True])
+                                            ascending=[False, True])
             seen_names = set()
             all_names_ordered = []
             for _, row in group_data.iterrows():
@@ -706,12 +780,12 @@ def determine_taxon_prop(df):
                             "name": replace_char(cc_list[1]),
                             "language": cc_list[0]
                         })
-                # 去重複，保持順序
+                # 去重複，只考慮 language 和 name，保持順序
                 seen_combinations = set()
                 unique_common_names = []
                 for item in common_names_list:
-                    # 使用 tuple 作為唯一識別
-                    key = (item['language'], item['name'], item['area'])
+                    # 只使用 language 和 name 作為唯一識別
+                    key = (item['language'], item['name'])
                     if key not in seen_combinations:
                         seen_combinations.add(key)
                         unique_common_names.append(item)
@@ -985,7 +1059,7 @@ def check_deleted_usages():
 
 
 
-def get_per_usages(taxon_name_id, rows, prop_df_, name_df, ref_df, conn, backbone_ref_ids):
+def get_per_usages(taxon_name_id, rows, prop_df_, name_df, ref_df, conn, backbone_ref_ids, references):
     """
     取得特定 taxon_name_id 的 per_usages 資料
     Parameters:
@@ -1011,11 +1085,12 @@ def get_per_usages(taxon_name_id, rows, prop_df_, name_df, ref_df, conn, backbon
     # 4-2 相同taxon_name_id的有效usage (轉成per_usages形式)
     for usage in rows[(rows.taxon_name_id == taxon_name_id) & 
                          (rows.ru_status == 'accepted')].to_dict('records'):
-        per_usages.append({
-            "pro_parte": False,
-            "reference_id": usage.get('reference_id'),
-            "including_usage_id": usage.get('ru_id')
-        })
+        if usage.get('reference_id') in references: # 必須要是納入的文獻
+            per_usages.append({
+                "pro_parte": False,
+                "reference_id": usage.get('reference_id'),
+                "including_usage_id": usage.get('ru_id')
+            })
     # 4-3 taxon_name_id本身的發表文獻
     name_rows = name_df[name_df.taxon_name_id == taxon_name_id]
     if not name_rows.empty:
@@ -1028,9 +1103,10 @@ def get_per_usages(taxon_name_id, rows, prop_df_, name_df, ref_df, conn, backbon
                 "including_usage_id": None
             })
     if len(per_usages):
+        # print(per_usages)
         per_usages = pd.DataFrame(per_usages)
-        # 只取ref_df中有的reference_id
-        per_usages = per_usages[per_usages.reference_id.isin(ref_df.index.to_list())]
+        # # 只取ref_df中有的reference_id
+        # per_usages = per_usages[per_usages.reference_id.isin(ref_df.index.to_list())]
         # 排除backbone
         per_usages = per_usages[~per_usages.reference_id.isin(backbone_ref_ids)]
         # 如果有reference_id重複時 要依including_usage_reference_id優先序選擇優先的那個
@@ -1041,5 +1117,11 @@ def get_per_usages(taxon_name_id, rows, prop_df_, name_df, ref_df, conn, backbon
             removing_ru_id = [rr for rr in temp.ru_id.to_list() if rr not in chosen_ru_list]
             per_usages = per_usages[~per_usages.including_usage_id.isin(removing_ru_id)]
         per_usages = per_usages.replace({np.nan: None})
+        query = "SELECT id, publish_year FROM `references` WHERE id IN %s"
+        with conn.cursor() as cursor:
+            execute_line = cursor.execute(query, (per_usages.reference_id.unique().tolist(),))
+            ref_year = pd.DataFrame(cursor.fetchall(), columns=['reference_id', 'publish_year'])
+            per_usages = per_usages.merge(ref_year)
+            per_usages = per_usages.sort_values('publish_year', ascending=True)
         per_usages = per_usages.drop(columns=['including_usage_id']).to_dict('records')
     return per_usages
