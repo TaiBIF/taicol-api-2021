@@ -716,6 +716,10 @@ def determine_taxon_prop(df):
                         seen_combinations.add(key)
                         unique_common_names.append(item)
                 common_names_values[pos] = unique_common_names
+    # 將 None 值轉換為空 list
+    for i in range(n_ids):
+        if common_names_values[i] is None:
+            common_names_values[i] = []
     result_data['common_names'] = common_names_values
     # 處理 additional_fields, custom_fields, type_specimens（不限定地位）
     for field in ['additional_fields', 'custom_fields', 'type_specimens']:
@@ -758,6 +762,10 @@ def determine_taxon_prop(df):
                             grouped_items = grouped_items.rename(columns={'formatted': 'field_value'})
                             all_items = grouped_items.replace({np.nan: None}).to_dict('records')
                     field_values[pos] = all_items
+        # 將 None 值轉換為空 list
+        for i in range(n_ids):
+            if field_values[i] is None:
+                field_values[i] = []
         result_data[field] = field_values
     # 處理其他基本屬性
     basic_attributes = ['is_in_taiwan', 'alien_type', 'is_endemic', 'is_fossil', 'is_terrestrial', 
