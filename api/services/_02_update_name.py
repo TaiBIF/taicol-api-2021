@@ -4,7 +4,7 @@ from datetime import datetime
 import json
 from numpy import nan
 import numpy as np
-from api.update.utils import DatabaseManager, AuthorFormatter, setup_logging
+from api.services.utils.common import DatabaseManager, AuthorFormatter, setup_logging
 import logging
 from collections import defaultdict
 
@@ -86,11 +86,9 @@ class TaxonomicNameUpdater(DatabaseManager):
         # 根據不同的查詢條件調整 WHERE 子句
         if person_ids:
             # 先從 person_ids 獲取 taxon_name_ids
-            # self.logger.info(f"從 {len(person_ids)} 個 person_ids 獲取對應的 taxon_name_ids")
             taxon_name_ids_from_persons = self.get_taxon_name_ids_from_person_ids(person_ids)
             
             if not taxon_name_ids_from_persons:
-                # self.logger.info("沒有找到對應的 taxon_name_ids")
                 return pd.DataFrame()
             
             # 使用獲取到的 taxon_name_ids，並且查詢 id 或 original_taxon_name_id 匹配的記錄
@@ -109,12 +107,10 @@ class TaxonomicNameUpdater(DatabaseManager):
                 return pd.DataFrame()
         elif min_taxon_name_id is not None:
             # 從最小 ID 獲取 taxon_name_ids
-            # self.logger.info(f"從 taxon_name_id >= {min_taxon_name_id} 獲取對應的學名")
             
             taxon_name_ids_from_min = self.get_taxon_name_ids_from_min_id(min_taxon_name_id)
             
             if not taxon_name_ids_from_min:
-                # self.logger.info("沒有找到對應的 taxon_name_ids")
                 return pd.DataFrame()
             
             # 使用獲取到的 taxon_name_ids，並且查詢 id 或 original_taxon_name_id 匹配的記錄
@@ -139,14 +135,6 @@ class TaxonomicNameUpdater(DatabaseManager):
         
         if not results:
             return pd.DataFrame()
-        
-        # # 在這裡記錄實際查詢到的結果數量
-        # if person_ids:
-        #     self.logger.info(f"從 person_ids 查詢到 {len(results)} 筆學名記錄")
-        # elif taxon_name_ids:
-        #     self.logger.info(f"從 taxon_name_ids 查詢到 {len(results)} 筆學名記錄")
-        # elif min_taxon_name_id is not None:
-        #     self.logger.info(f"從最小 ID 條件查詢到 {len(results)} 筆學名記錄")
         
         columns = ['taxon_name_id', 'rank_id', 'nomenclature_id', 'name',
                   'original_taxon_name_id', 'formatted_authors', 'publish_year', 'authors_name',
@@ -253,12 +241,12 @@ class TaxonomicNameUpdater(DatabaseManager):
                         s2_rank = layer.get('rank_abbreviation') + ' '
 
                     if latin_genus and latin_s1:
-                        formatted_name = f"<i>{latin_genus} {latin_s1} {s2_rank}{layer.get('latin_name', '')}</i>"
+                        formatted_name = f"<i>{latin_genus} {latin_s1}</i> {s2_rank}<i>{layer.get('latin_name', '')}</i>"
 
                     elif species_id:
                         # 需要查詢 species 資訊
                         species_prop = self._get_species_properties(species_id)
-                        formatted_name = f"<i>{species_prop.get('latin_genus', '')} {species_prop.get('latin_s1', '')} {s2_rank}{layer.get('latin_name', '')}</i>"
+                        formatted_name = f"<i>{species_prop.get('latin_genus', '')} {species_prop.get('latin_s1', '')}</i> {s2_rank}<i>{layer.get('latin_name', '')}</i>"
 
                     else:
                         formatted_name = name
@@ -415,11 +403,9 @@ class TaxonomicNameUpdater(DatabaseManager):
         failed_names = []
         
         # 1. 預先建立高效查詢結構
-        # self.logger.info("建立作者查詢索引...")
         author_lookup = self._create_author_lookup(author_df)
         
         # 2. 批次獲取額外資料（大幅簡化）
-        # self.logger.info("批次獲取額外資料...")
         publish_years, original_names = self._batch_get_additional_data(df)
         
         # 3. 向量化處理（但保持相同邏輯）
@@ -434,7 +420,6 @@ class TaxonomicNameUpdater(DatabaseManager):
                 return ""
         
         # 4. 使用 apply 進行向量化操作（比 iterrows 快）
-        # self.logger.info("格式化作者...")
         df = df.copy()  # 避免 SettingWithCopyWarning
         df['formatted_author'] = df.apply(process_single_row, axis=1)
         
@@ -608,7 +593,6 @@ class TaxonomicNameUpdater(DatabaseManager):
     def prepare_names_for_db(self, rows, df, author_df, update_time):
         """準備學名資料"""
         if not rows:
-            # self.logger.info("沒有學名資料需要更新")
             return {}
         
         # 使用優化版本格式化作者
@@ -647,10 +631,8 @@ class TaxonomicNameUpdater(DatabaseManager):
     def batch_update_api_names(self, final_data, update_time):
         """批次更新 api_names 表"""
         if not final_data:
-            # self.logger.info("沒有資料需要更新到 api_names")
             return
         
-        # self.logger.info(f"準備批次更新 {len(final_data)} 筆 api_names 資料")
         
         # 完整更新（包含 formatted_name 和 name_author）
         # 只有在資料真的有變化時才更新 updated_at
@@ -681,18 +663,15 @@ class TaxonomicNameUpdater(DatabaseManager):
         
         # 執行批次更新
         if full_data:
-            # self.logger.info(f"完整更新的記錄: {len(full_data)} 筆")
             self.batch_execute(full_update_query, full_data, self.batch_size)
         
     # ======================== 主要更新方法 ========================
     
     def run_update(self, custom_updated=None, limit=None, taxon_name_ids=None, person_ids=None, min_taxon_name_id=None, hybrid_name_ids=None, update_all=False):
         """執行學名更新"""
-        # self.logger.info("開始更新學名資料...")
         
         # 如果是指定雜交學名模式，直接處理雜交學名
         if hybrid_name_ids:
-            # self.logger.info(f"指定更新 {len(hybrid_name_ids)} 個雜交學名")
             
             # 獲取更新時間
             update_times = self.get_last_update_times()
@@ -715,13 +694,7 @@ class TaxonomicNameUpdater(DatabaseManager):
                         'created_at': taxon_names_updated
                     }
                 
-                # self.logger.info(f"準備更新 {len(hybrid_rows)} 個雜交學名")
                 self.batch_update_api_names(hybrid_data, taxon_names_updated)
-                # self.logger.info(f"成功更新 {len(hybrid_data)} 筆雜交學名資料")
-            # else:
-                # self.logger.info("沒有找到指定的雜交學名")
-            
-            # self.logger.info("雜交學名更新完成!")
             return
         
         # 一般學名處理邏輯
@@ -730,18 +703,6 @@ class TaxonomicNameUpdater(DatabaseManager):
         update_times = self.get_last_update_times()
         last_names_updated = update_times['api_names']
         taxon_names_updated = update_times['taxon_names']
-        
-        # # 根據不同的更新方式顯示不同的日誌
-        # if person_ids:
-        #     self.logger.info(f"根據 {len(person_ids)} 個 person_ids 更新相關學名")
-        # elif taxon_name_ids:
-        #     self.logger.info(f"指定更新 {len(taxon_name_ids)} 個 taxon_name_ids 及其相關學名")
-        # elif min_taxon_name_id is not None:
-        #     self.logger.info(f"更新 taxon_name_id >= {min_taxon_name_id} 的相關學名")
-        # elif custom_updated:
-        #     self.logger.info(f"自定義更新時間: {custom_updated}")
-        # else:
-        #     self.logger.info(f"學名上次更新時間: {last_names_updated}")
         
         # 1. 獲取需要更新的學名資料（包含完整資訊）
         if person_ids:
@@ -771,13 +732,11 @@ class TaxonomicNameUpdater(DatabaseManager):
             )
         
         if not taxon_name_df.empty:
-            # self.logger.info(f"找到 {len(taxon_name_df)} 個需要更新的學名")
             
             # 處理學名格式化
             rows = self.process_taxon_names(taxon_name_df)
             
             # 獲取作者資料（使用優化版本）
-            # self.logger.info("處理學名作者...")
             author_df = self.fetch_author_data(taxon_name_df)
             
             # 準備完整資料（包含格式化名稱和作者）
@@ -786,14 +745,9 @@ class TaxonomicNameUpdater(DatabaseManager):
             # 批次更新 api_names 表
             if final_data:
                 self.batch_update_api_names(final_data, taxon_names_updated)
-        #     else:
-        #         self.logger.info("沒有資料需要更新")
-        # else:
-        #     self.logger.info("沒有需要更新的學名")
         
         # 2. 處理雜交學名（只有在非指定 ID 或 person_ids 模式下才處理）
         if not taxon_name_ids and not person_ids and min_taxon_name_id is None:
-            # self.logger.info("處理雜交學名...")
             hybrid_rows = self.process_hybrid_names()
             if hybrid_rows:
                 # 雜交學名不需要作者處理，直接準備資料
@@ -809,81 +763,5 @@ class TaxonomicNameUpdater(DatabaseManager):
                         'updated_at': taxon_names_updated,
                         'created_at': taxon_names_updated
                     }
-                
-                # self.logger.info(f"準備更新 {len(hybrid_rows)} 個雜交學名")
-                
+                                
                 self.batch_update_api_names(hybrid_data, taxon_names_updated)
-                # self.logger.info(f"成功更新 {len(hybrid_data)} 筆雜交學名資料")
-        #     else:
-        #         self.logger.info("沒有雜交學名需要更新")
-        # else:
-        #     # person修改不會影響雜交 最小id是由檔案匯入也不會有雜交
-        #     self.logger.info("指定 ID、person_ids 或最小 ID 模式：跳過雜交學名處理")
-        
-        # self.logger.info("學名更新完成!")
-
-# def main():
-#     """主函數"""
-#     # 一般執行
-#     with TaxonomicNameUpdater(batch_size=1000, max_retries=3) as updater:
-#         updater.run_update()
-    
-#     # 測試
-#     # with TaxonomicNameUpdater(batch_size=1000, max_retries=3) as updater:
-#     #     updater.run_update()
-    
-#     # 限制數量 測試
-#     # with TaxonomicNameUpdater(batch_size=1000, max_retries=3) as updater:
-#     #     updater.run_update(limit=100)
-    
-#     # 更新全部
-#     # with TaxonomicNameUpdater(batch_size=1000, max_retries=3) as updater:
-#     #     updater.run_update(update_all=True)
-    
-#     # 自定義更新時間
-#     # with TaxonomicNameUpdater(batch_size=1000, max_retries=3) as updater:
-#     #     updater.run_update(custom_updated=datetime(2024, 1, 1))
-    
-#     # 根據 person_ids 更新
-#     # with TaxonomicNameUpdater(batch_size=1000, max_retries=3) as updater:
-#     #     updater.run_update(person_ids=[1, 2, 3])
-    
-#     # 根據 taxon_name_ids 更新（包含相關學名）
-#     # with TaxonomicNameUpdater(batch_size=1000, max_retries=3) as updater:
-#     #     updater.run_update(taxon_name_ids=[100, 200, 300])
-    
-#     # 根據最小 taxon_name_id 更新
-#     # with TaxonomicNameUpdater(batch_size=1000, max_retries=3) as updater:
-#     #     updater.run_update(min_taxon_name_id=1000)
-    
-#     # 根據指定雜交學名 IDs 更新
-#     # with TaxonomicNameUpdater(batch_size=1000, max_retries=3) as updater:
-#     #     updater.run_update(hybrid_name_ids=[1001, 1002, 1003])
-
-# if __name__ == "__main__":
-#     main()
-
-
-# 使用範例：
-# from scripts.final._02_update_name import *
-# 
-# # 一般更新
-# with TaxonomicNameUpdater(batch_size=1000, max_retries=3) as updater:
-#     updater.run_update()
-#
-# # 根據 person_ids 更新
-# with TaxonomicNameUpdater(batch_size=1000, max_retries=3) as updater:
-#     updater.run_update(person_ids=[1, 2, 3])
-#
-# # 根據 taxon_name_ids 更新（包含相關學名）
-# with TaxonomicNameUpdater(batch_size=1000, max_retries=3) as updater:
-#     updater.run_update(taxon_name_ids=[100, 200, 300])
-#
-# # 根據最小 taxon_name_id 更新
-# with TaxonomicNameUpdater(batch_size=1000, max_retries=3) as updater:
-#     updater.run_update(min_taxon_name_id=1000)
-#
-#
-# # 根據指定雜交學名 IDs 更新
-# with TaxonomicNameUpdater(batch_size=1000, max_retries=3) as updater:
-#     updater.run_update(hybrid_name_ids=[1001, 1002, 1003])

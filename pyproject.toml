@@ -17,6 +17,8 @@ drf-yasg = "^1.20.0"
 django-cors-headers = "^3.13.0"
 requests = "^2.27.1"
 sqlalchemy = "^2.0.41"
+dotenv = "^0.9.9"
+tqdm = "^4.67.1"
 
 [tool.poetry.group.dev.dependencies]
 

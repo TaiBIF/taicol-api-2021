@@ -87,30 +87,6 @@ lin_ranks = [50, 49, 3, 12, 18, 22, 26, 30, 34]
 sub_lin_ranks = [35,36,37,38,39,40,41,42,43,44,45,46]
 
 
-def to_firstname_abbr(string):
-    s_list = re.split(r'[\s|\-]', string)
-    for i in range(len(s_list)):
-        if len(s_list[i]) == 1 or re.match(r"(\w[\.]).*", s_list[i]):  # 本身只有一個字母或本身是縮寫
-            c = s_list[i]
-        else:
-            c = re.sub(r"(\w).*", r'\1.', s_list[i])
-        if i == 0:
-            full_abbr = c
-        else:
-            full_abbr += '-' + c
-    return full_abbr
-
-
-def to_middlename_abbr(content):
-    if re.match(r"(\w[\.]).*", content):  # 本身是縮寫
-        return re.sub(r"(\w[\.]).*", r"\1", content)
-    elif len(content) == 1:  # 本身只有一個字
-        return content
-    else:
-        return re.sub(r"(\w).*", r"\1.", content)
-
-
-
 var_dict = requests.get("https://raw.githubusercontent.com/TaiBIF/tbia-portal/main/data/variants.json")
 var_dict = var_dict.json()
 

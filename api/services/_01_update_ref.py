@@ -4,7 +4,7 @@ from datetime import datetime
 import json
 from numpy import nan
 import numpy as np
-from api.update.utils import DatabaseManager, to_firstname_abbr, to_middlename_abbr, setup_logging
+from api.services.utils.common import DatabaseManager, to_firstname_abbr, to_middlename_abbr, setup_logging
 import logging
 import time
 
@@ -106,7 +106,6 @@ class CitationUpdater(DatabaseManager):
             
         elif min_reference_id is not None:
             # 使用最小 reference_id 條件
-            # self.logger.info(f"從 reference_id >= {min_reference_id} 獲取對應的文獻")
             base_query += " AND r.id >= %s"
             params.append(min_reference_id)
             
@@ -143,14 +142,6 @@ class CitationUpdater(DatabaseManager):
 
         if not results:
             return pd.DataFrame()
-        
-        # # 在這裡記錄實際查詢到的結果數量
-        # if person_ids:
-        #     self.logger.info(f"從 person_ids 查詢到 {len(results)} 筆文獻記錄")
-        # elif reference_ids:
-        #     self.logger.info(f"從 reference_ids 查詢到 {len(results)} 筆文獻記錄")
-        # elif min_reference_id is not None:
-        #     self.logger.info(f"從最小 reference_id 條件查詢到 {len(results)} 筆文獻記錄")
         
         columns = ['last_name', 'first_name', 'middle_name', 'reference_id', 
                   'order', 'year', 'type', 'title', 'doi', 'article_title', 
@@ -310,7 +301,6 @@ class CitationUpdater(DatabaseManager):
             refs_need_doi = refs[(refs['publish_date'].isna()) & (refs['doi'].notna())]
             
             if not refs_need_doi.empty:
-                # self.logger.info(f"需要從 DOI 獲取發布日期的文獻: {len(refs_need_doi)} 筆")
                 
                 for _, row in refs_need_doi.iterrows():
                     try:
@@ -321,8 +311,6 @@ class CitationUpdater(DatabaseManager):
                     except Exception as e:
                         self.logger.error(f"❌ Reference ID {row.get('reference_id', 'Unknown')}: DOI 處理失敗 - {e}")
                         refs_dates[row.get('reference_id')] = None
-            # else:
-            #     self.logger.info("所有文獻都已有發布日期，無需從 DOI 獲取")
         
         # 處理每個 reference_id 的引用資料
         for ref_id in results['reference_id'].unique():
@@ -367,7 +355,6 @@ class CitationUpdater(DatabaseManager):
                         'publish_date': None
                     }
                     citation_data.append(basic_record)
-                    # self.logger.info(f"✅ Reference ID {ref_id}: 已建立基本記錄作為後備")
                 except Exception as fallback_error:
                     self.logger.error(f"❌ Reference ID {ref_id}: 連基本記錄都無法建立 - {fallback_error}")
         
@@ -386,14 +373,12 @@ class CitationUpdater(DatabaseManager):
             update_time: 更新時間戳
         """
         if citation_df.empty:
-        #     self.logger.info("沒有資料需要更新")
             return
             
         # 確保欄位順序並添加時間戳
         citation_df = citation_df[['reference_id', 'author', 'short_author', 'content', 'publish_date']].copy()
         citation_df['updated_at'] = update_time
         citation_df['created_at'] = update_time
-        # citation_df.to_csv('citation_df.csv',index=None)
         
         # 使用 INSERT ... ON DUPLICATE KEY UPDATE 語法
         query = """
@@ -416,9 +401,7 @@ class CitationUpdater(DatabaseManager):
         
         # 轉換為元組列表
         all_data = [tuple(row) for row in citation_df.values]
-        
-        # self.logger.info(f"準備批次更新 {len(all_data)} 筆 api_citations 資料")
-        
+                
         # 使用 DatabaseManager 的批次執行方法
         self.batch_execute(query, all_data, self.batch_size)
     
@@ -465,7 +448,6 @@ class CitationUpdater(DatabaseManager):
             raise ValueError("批次大小必須大於 0")
         
         self.batch_size = batch_size
-        # self.logger.info(f"批次大小已設定為: {self.batch_size}")
     
     def run_update(self, custom_updated=None, limit=None, get_publish_date=True, update_all=False, reference_ids=None, person_ids=None, min_reference_id=None):
         """
@@ -480,31 +462,10 @@ class CitationUpdater(DatabaseManager):
             person_ids: 指定的 person_id 列表
             min_reference_id: 最小 reference_id 條件
         """
-        # self.logger.info("開始更新引用資料...")
-        # self.logger.info(f"當前批次大小: {self.batch_size}")
-        
+
         # 1. 獲取更新時間
         last_updated_api_citation, last_updated_references = self.get_last_update_times()
         
-        # # 根據不同的更新方式顯示不同的日誌
-        # if person_ids:
-        #     if isinstance(person_ids, (list, tuple)):
-        #         self.logger.info(f"指定更新 person_ids: {len(person_ids)} 個 ({person_ids[:10]}{'...' if len(person_ids) > 10 else ''})")
-        #     else:
-        #         self.logger.info(f"指定更新 person_id: {person_ids}")
-        # elif reference_ids:
-        #     if isinstance(reference_ids, (list, tuple)):
-        #         self.logger.info(f"指定更新 reference_ids: {len(reference_ids)} 個 ({reference_ids[:10]}{'...' if len(reference_ids) > 10 else ''})")
-        #     else:
-        #         self.logger.info(f"指定更新 reference_id: {reference_ids}")
-        # elif min_reference_id is not None:
-        #     self.logger.info(f"更新 reference_id >= {min_reference_id} 的文獻")
-        # elif custom_updated:
-        #     self.logger.info(f"自定義更新時間: {custom_updated}")
-        # elif update_all:
-        #     self.logger.info("更新全部文獻")
-        # else:
-        #     self.logger.info(f"引用上次更新時間: {last_updated_api_citation}")
         
         # 2. 獲取需要更新的資料
         results = self.fetch_updated_references(
@@ -517,92 +478,11 @@ class CitationUpdater(DatabaseManager):
         )
 
         if results.empty:
-            # self.logger.info("沒有需要更新的資料")
             return
-        
-        # self.logger.info(f"找到 {len(results['reference_id'].unique())} 個需要更新的文獻")
-        
+                
         # 3. 處理引用資料（包含發布日期）
         citation_df = self.process_citations(results, get_publish_date=get_publish_date)
         
         # 4. 更新引用資料和發布日期
         if not citation_df.empty:
-            # self.logger.info("更新引用資料和發布日期...")
             self.update_citations_db(citation_df, last_updated_references)
-        # else:
-        #     self.logger.info("沒有資料需要更新")
-        
-        # self.logger.info("更新完成!")
-
-
-# 使用範例：
-
-# def main():
-#     """主函數"""
-#     # 一般執行
-#     with CitationUpdater(batch_size=1000, max_retries=3) as updater:
-#         updater.run_update()
-    
-#     # 測試
-#     # with CitationUpdater(batch_size=1000, max_retries=3) as updater:
-#     #     updater.run_update(get_publish_date=False)  # 不獲取發布日期，提高速度
-    
-#     # 限制數量測試
-#     # with CitationUpdater(batch_size=1000, max_retries=3) as updater:
-#     #     updater.run_update(limit=100)
-    
-#     # 自定義更新時間
-#     # with CitationUpdater(batch_size=1000, max_retries=3) as updater:
-#     #     updater.run_update(custom_updated=datetime(2024, 1, 1))
-    
-#     # 使用 reference_id 列表更新
-#     # with CitationUpdater(batch_size=1000, max_retries=3) as updater:
-#     #     updater.run_update(reference_ids=[1, 2, 3, 4, 5])
-    
-#     # 使用單一 reference_id 更新
-#     # with CitationUpdater(batch_size=1000, max_retries=3) as updater:
-#     #     updater.run_update(reference_ids=123)
-    
-#     # 使用 person_id 列表更新（更新這些人員相關的所有文獻）
-#     # with CitationUpdater(batch_size=1000, max_retries=3) as updater:
-#     #     updater.run_update(person_ids=[10, 20, 30, 40, 50])
-    
-#     # 使用單一 person_id 更新
-#     # with CitationUpdater(batch_size=1000, max_retries=3) as updater:
-#     #     updater.run_update(person_ids=456)
-    
-#     # 🆕 根據最小 reference_id 更新
-#     # with CitationUpdater(batch_size=1000, max_retries=3) as updater:
-#     #     updater.run_update(min_reference_id=1000)
-
-# if __name__ == "__main__":
-#     main()
-
-
-
-# 使用方式：
-# from scripts.final._01_update_ref import *
-# 
-# # 使用 reference_id 列表更新
-# with CitationUpdater(batch_size=1000, max_retries=3) as updater:
-#     updater.run_update(reference_ids=[1, 2, 3, 4, 5])
-#
-# # 使用單一 reference_id 更新  
-# with CitationUpdater(batch_size=1000, max_retries=3) as updater:
-#     updater.run_update(reference_ids=123)
-#
-# # 使用 person_id 列表更新（更新這些人員相關的所有文獻）
-# with CitationUpdater(batch_size=1000, max_retries=3) as updater:
-#     updater.run_update(person_ids=[10, 20, 30, 40, 50])
-#
-# # 使用單一 person_id 更新
-# with CitationUpdater(batch_size=1000, max_retries=3) as updater:
-#     updater.run_update(person_ids=456)
-#
-# # 🆕 根據最小 reference_id 更新
-# with CitationUpdater(batch_size=1000, max_retries=3) as updater:
-#     updater.run_update(min_reference_id=1000)
-#
-# # 可以結合 limit 參數控制數量
-# with CitationUpdater(batch_size=1000, max_retries=3) as updater:
-#     updater.run_update(min_reference_id=1000, limit=5000)

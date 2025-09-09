@@ -1,12 +1,15 @@
 import pymysql
 import json
 import numpy as np
+import pandas as pd
 import time
 import logging
 from datetime import datetime
 from contextlib import contextmanager
 from conf.settings import env
+from dotenv import load_dotenv
 
+load_dotenv(override=True)
 
 db_settings = {
     "host": env('DB_HOST'),
@@ -45,7 +48,7 @@ def to_firstname_abbr(name):
             if part == '-':
                 result += '-'
             else:
-                result += part[0].upper() + '.'
+                result += part[0] + '.'  # 移除 .upper()
         elif part.isspace():
             result += '-'  # 將空格替換成連字符
     
@@ -62,9 +65,10 @@ def to_middlename_abbr(name):
     abbr = ""
     for part in parts:
         if part:
-            abbr += part[0].upper() + "."
+            abbr += part[0] + "."  # 移除 .upper()
     
     return abbr
+
 
 class DatabaseManager:
     """資料庫管理基類"""
@@ -90,16 +94,7 @@ class DatabaseManager:
             })
             
             self.conn = pymysql.connect(**db_config)
-            
-            # # 設置 session 變數以優化性能
-            # with self.conn.cursor() as cursor:
-            #     cursor.execute("SET SESSION sql_mode = 'STRICT_TRANS_TABLES,NO_ZERO_DATE,NO_ZERO_IN_DATE,ERROR_FOR_DIVISION_BY_ZERO'")
-            #     cursor.execute("SET SESSION innodb_lock_wait_timeout = 120")
-            #     cursor.execute("SET SESSION bulk_insert_buffer_size = 8388608")
-            #     # 增加連接超時設定
-            #     cursor.execute("SET SESSION wait_timeout = 28800")  # 8小時
-            #     cursor.execute("SET SESSION interactive_timeout = 28800")  # 8小時
-                
+                            
         except Exception as e:
             self.logger.error(f"資料庫連接失敗: {e}")
             raise
@@ -406,77 +401,20 @@ def setup_logging(level=logging.INFO):
     )
 
 
-    
-class AuthorFormatter:
-    """作者格式化工具類"""
-    
-    @staticmethod
-    def format_author_list(names, p_year=None, nomenclature_id=1):
-        """
-        格式化作者列表
-        
-        Args:
-            names: 作者名稱列表
-            p_year: 發布年份
-            nomenclature_id: 命名規約ID (1: 動物, 2: 植物, 3: 細菌)
-        """
-        if not names:
-            return ""
-        
-        # 動物命名規約
-        if nomenclature_id == 1:
-            if len(names) == 1:
-                author_str = names[0]
-            elif len(names) == 2:
-                author_str = f'{names[0]} & {names[1]}'
-            else:
-                author_str = ', '.join(names[:-1]) + f' & {names[-1]}'
-            
-            if p_year and p_year not in [None, 0, '0', '']:
-                author_str += f', {p_year}'
-        
-        # 植物命名規約
-        elif nomenclature_id == 2:
-            if len(names) == 1:
-                author_str = names[0]
-            elif len(names) == 2:
-                author_str = f'{names[0]} & {names[1]}'
-            else:
-                author_str = ', '.join(names[:-1]) + f' & {names[-1]}'
-        
-        # 細菌命名規約
-        elif nomenclature_id == 3:
-            if len(names) == 1:
-                author_str = names[0]
-            elif len(names) == 2:
-                author_str = f'{names[0]} & {names[1]}'
-            else:
-                author_str = f'{names[0]} et al.'
-            
-            if p_year and p_year not in [None, 0, '0', '']:
-                author_str += f' {p_year}'
-        
-        else:
-            author_str = ', '.join(names)
-        
-        return author_str
-    
-    @staticmethod
-    def safe_json_loads(json_str):
-        """安全的JSON解析"""
-        try:
-            return json.loads(json_str) if json_str else {}
-        except (json.JSONDecodeError, TypeError):
-            return {}
+def safe_json_dumps(x):
+    if x is None or (not isinstance(x, (dict, list)) and pd.isna(x)):
+        return None
+    try:
+        return json.dumps(
+            x,
+            default=lambda o: o.item() if hasattr(o, 'item') else str(o)
+        )
+    except Exception as e:
+        print(f"JSON 轉換失敗：{x}，錯誤：{e}")
+        return None
 
-def setup_logging(level=logging.INFO):
-    """設置日誌配置"""
-    logging.basicConfig(
-        level=level,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(f'system_{datetime.now().strftime("%Y%m%d")}.log'),
-            logging.StreamHandler()
-        ]
-    )
+
+def get_conn():
+    conn = pymysql.connect(**db_settings)
+    return conn
 
