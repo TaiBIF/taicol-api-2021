@@ -25,7 +25,7 @@ import requests
 from django.views.decorators.csrf import csrf_exempt
 from sqlalchemy import create_engine
 from api.services.utils.common import safe_json_dumps
-
+import os
 
 
 db_settings = {
