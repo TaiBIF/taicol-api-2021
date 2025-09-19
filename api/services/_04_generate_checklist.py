@@ -384,7 +384,7 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references)
 
     # 以下只處理ru_status = accepted
     prop_df = get_prop_df(total_df.ru_id.to_list()+common_name_rus)
-    prop_df = prop_df.merge(ref_df[['publish_date','type','publish_year']], right_index=True, left_on="reference_id")
+    prop_df = prop_df.merge(ref_df[['publish_date','type','publish_year','subtitle']], right_index=True, left_on="reference_id")
 
     # print('a', time.time()-s)
     # s = time.time()
