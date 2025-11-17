@@ -760,8 +760,8 @@ def determine_taxon_prop(df):
         if common_names_values[i] is None:
             common_names_values[i] = []
     result_data['common_names'] = common_names_values
-    # 處理 additional_fields, custom_fields, type_specimens（不限定地位）
-    for field in ['additional_fields', 'custom_fields', 'type_specimens']:
+    # 處理 additional_fields, custom_fields（不限定地位）
+    for field in ['additional_fields', 'custom_fields']:
         field_values = np.full(n_ids, None, dtype=object)
         field_mask = df[field].notna()
         if field_mask.any():
@@ -774,32 +774,30 @@ def determine_taxon_prop(df):
                     if pd.notna(row[field]):
                         try:
                             if field_items := json.loads(row[field]):
-                                if field in ['additional_fields', 'custom_fields']:
-                                    # 為每個項目添加來源資訊
-                                    for item in field_items:
-                                        item.update({
-                                            'reference_id': row['reference_id'],
-                                            'publish_year': row.get('publish_year'),
-                                            'subtitle': row.get('subtitle'),
-                                            'ru_id': row['ru_id']
-                                        })
+                                # 為每個項目添加來源資訊
+                                for item in field_items:
+                                    item.update({
+                                        'reference_id': row['reference_id'],
+                                        'publish_year': row.get('publish_year'),
+                                        'subtitle': row.get('subtitle'),
+                                        'ru_id': row['ru_id']
+                                    })
                                 all_items.extend(field_items)
                         except (json.JSONDecodeError, TypeError):
                             pass
                 pos = id_to_pos[tmp_taxon_id]
                 if all_items:
-                    if field in ['additional_fields', 'custom_fields']:
-                        # 合併處理
-                        df_items = pd.DataFrame(all_items)
-                        group_key = 'field_name' if field == 'additional_fields' else 'field_name_en'
-                        if group_key in df_items.columns:
-                            df_items['formatted'] = df_items.apply(
-                                lambda row: f"{row['field_value']} ({row.get('subtitle', '')})", axis=1
-                            )
-                            df_items = df_items.sort_values(by=[group_key, 'publish_year'])
-                            grouped_items = df_items.groupby(group_key)['formatted'].apply('<br>'.join).reset_index()
-                            grouped_items = grouped_items.rename(columns={'formatted': 'field_value'})
-                            all_items = grouped_items.replace({np.nan: None}).to_dict('records')
+                    # 合併處理
+                    df_items = pd.DataFrame(all_items)
+                    group_key = 'field_name' if field == 'additional_fields' else 'field_name_en'
+                    if group_key in df_items.columns:
+                        df_items['formatted'] = df_items.apply(
+                            lambda row: f"{row['field_value']} ({row.get('subtitle', '')})", axis=1
+                        )
+                        df_items = df_items.sort_values(by=[group_key, 'publish_year'])
+                        grouped_items = df_items.groupby(group_key)['formatted'].apply('<br>'.join).reset_index()
+                        grouped_items = grouped_items.rename(columns={'formatted': 'field_value'})
+                        all_items = grouped_items.replace({np.nan: None}).to_dict('records')
                     field_values[pos] = all_items
         # 將 None 值轉換為空 list
         for i in range(n_ids):
@@ -1022,7 +1020,13 @@ def check_deleted_usages():
             conn.commit()
 
 
-
+def get_type_specimens(taxon_name_id, prop_df_):
+    # 取得特定 taxon_name_id 的 type_specimens 資料
+    # 僅有接受 & 非接受名需要彙整
+    type_specimens = []
+    for p in prop_df_[prop_df_.taxon_name_id == taxon_name_id].to_dict('records'):
+        type_specimens += json.loads(p.get('type_specimens'))
+    return type_specimens
 
 def get_per_usages(taxon_name_id, rows, prop_df_, name_df, ref_df, conn, backbone_ref_ids, references):
     """

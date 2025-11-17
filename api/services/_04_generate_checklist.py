@@ -9,7 +9,7 @@ from numpy import nan
 from api.utils import get_whitelist, sub_lin_ranks, rank_order_map
 from api.services.utils.common import get_conn
 from api.services.utils.checklist import *
-import time
+# import time
 
 
 
@@ -398,7 +398,6 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references)
     prop_df_ = prop_df.merge(df_for_prop)
     prop_df_['ru_order'] = prop_df_.groupby('tmp_taxon_id').cumcount() + 1
     all_prop_df = determine_taxon_prop(prop_df_)
-    all_prop_df['type_specimens'] = all_prop_df['type_specimens'].apply(lambda x: [] if not x else x)
     # print('c', time.time()-s)
 
     # 處理per_usages
@@ -472,7 +471,6 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references)
                 'is_brackish', 'is_marine']].to_dict('records')[0]
             if rank_order_map[row.rank_id] <= rank_order_map[30]: # 屬以上 顯示未知
                 now_prop['is_in_taiwan'] = 2
-            type_specimens = all_prop_df[all_prop_df.tmp_taxon_id==nt].type_specimens.values[0]
             # 所有屬性 資訊跟著有效名
             # 其他學名就存成無效 or 誤用
             # 要先在介面回傳預覽表，OK後才存進去my_namespace_usage
@@ -492,7 +490,7 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references)
                     now_dict['properties'] = safe_json_dumps(now_prop)
                     now_dict['parent_taxon_name_id'] = parent_taxon_name_id
                     now_dict['per_usages'] = safe_json_dumps(get_per_usages(rrr.get('taxon_name_id'), rows, prop_df_, name_df, ref_df, conn, backbone_ref_ids, references))
-                    now_dict['type_specimens'] = safe_json_dumps(type_specimens)
+                    now_dict['type_specimens'] = safe_json_dumps(get_type_specimens(rrr.get('taxon_name_id'), prop_df_))
                 else:
                     now_new_prop = {}
                     now_indications = []
@@ -510,6 +508,7 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references)
                                 merged_indications += ii.split(',')
                         merged_indications = list(set(merged_indications))
                         now_indications = [m for m in merged_indications if m != 'syn. nov.']
+                        now_dict['type_specimens'] = safe_json_dumps(get_type_specimens(rrr.get('taxon_name_id'), prop_df_))
                     now_new_prop['indications'] = now_indications
                     now_dict['properties'] = safe_json_dumps(now_new_prop)
                     now_dict['parent_taxon_name_id'] = None

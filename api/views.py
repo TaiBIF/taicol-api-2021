@@ -1377,9 +1377,7 @@ def generate_checklist(request):
 
     from api.services._04_generate_checklist import process_taxon_checklist
 
-    s = time.time()
     final_usage_df, tmp_checklist_id = process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references)
-    print(time.time()-s)
     db_string = 'mysql+pymysql://{}:{}@{}:{}/{}'.format(db_settings.get('user'), db_settings.get('password'), db_settings.get('host'), db_settings.get('port'), db_settings.get('db'))
     db = create_engine(db_string)
 
