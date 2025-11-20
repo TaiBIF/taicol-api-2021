@@ -500,6 +500,7 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references)
                             now_indications = ['not of']
                         elif rrr.get('nomenclature_id') == 2: #植物
                             now_indications = ['auct. non']
+                        now_dict['type_specimens'] = '[]'
                     elif rrr.get('taxon_status') == 'not-accepted':
                         merged_indications = []
                         # indications = prop_df_[(prop_df_.ru_status == 'not-accepted') & (prop_df_.taxon_name_id== rrr.get('taxon_name_id'))].indications.values
@@ -513,7 +514,7 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references)
                     now_dict['properties'] = safe_json_dumps(now_new_prop)
                     now_dict['parent_taxon_name_id'] = None
                     now_dict['per_usages'] = safe_json_dumps(get_per_usages(rrr.get('taxon_name_id'), rows, prop_df_, name_df, ref_df, conn, backbone_ref_ids, references))
-                    now_dict['type_specimens'] = '[]'
+                    # now_dict['type_specimens'] = '[]'
                 final_usages.append(now_dict)
         except Exception as e: 
             print('merging', e)
