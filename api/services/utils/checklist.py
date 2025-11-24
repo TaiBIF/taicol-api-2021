@@ -1020,13 +1020,184 @@ def check_deleted_usages():
             conn.commit()
 
 
-def get_type_specimens(taxon_name_id, prop_df_):
-    # 取得特定 taxon_name_id 的 type_specimens 資料
-    # 僅有接受 & 非接受名需要彙整
-    type_specimens = []
-    for p in prop_df_[prop_df_.taxon_name_id == taxon_name_id].to_dict('records'):
-        type_specimens += json.loads(p.get('type_specimens'))
-    return type_specimens
+
+import json
+import pandas as pd
+from typing import List, Dict, Any, Optional
+
+
+def get_collector_ids(specimen: Dict[str, Any]) -> List[int]:
+    """
+    從標本記錄中提取採集者ID，支援多種格式
+    優先順序：collector_ids > collectors中的id
+    """
+    collector_ids = []
+    # 方法1：直接從collector_ids欄位取得
+    if specimen.get('collector_ids'):
+        ids = specimen['collector_ids']
+        if isinstance(ids, list):
+            collector_ids.extend([cid for cid in ids if cid is not None])
+        elif ids is not None:
+            collector_ids.append(ids)
+    # 方法2：從collectors陣列中提取id
+    if not collector_ids and specimen.get('collectors'):
+        collectors = specimen['collectors']
+        if isinstance(collectors, list):
+            for collector in collectors:
+                if collector and isinstance(collector, dict) and collector.get('id'):
+                    collector_ids.append(collector['id'])
+    # 去重並排序
+    unique_ids = list(set(collector_ids))
+    unique_ids.sort()
+    return unique_ids
+
+
+def deduplicate_type_specimens(name_df: pd.DataFrame, 
+                              prop_df_: pd.DataFrame, 
+                              taxon_name_id: int) -> List[Dict[str, Any]]:
+    """
+    從name和usage資料表整合並去除重複的模式標本記錄
+    Args:
+        name_df: name資料表，包含type_specimens欄位
+        prop_df_: usage資料表，包含type_specimens欄位
+        taxon_name_id: 目標分類群名稱ID
+    Returns:
+        List[Dict]: 去除重複後的模式標本記錄列表，每筆記錄包含source欄位
+    重複判斷依據：
+        - use (模式類別)：必須相同
+        - collector_ids/collectors中的id (採集者)：必須相同
+        - collector_number (採集號)：必須相同（空值不判斷）
+        - specimens[0].herbarium (標本館)：必須相同（空值不判斷）
+    優先級：
+        1. source="name"優先於source="usage"
+        2. 同source時，資訊欄位較多的優先
+    """
+    def get_duplicate_key(specimen: Dict[str, Any]) -> tuple:
+        """產生用於重複判斷的key"""
+        use = (specimen.get('use', '') or '').strip()
+        # 取得採集者ID（使用全局函數）
+        collector_ids = get_collector_ids(specimen)
+        # 取得採集號
+        # collector_number = specimen.get('collector_number', '').strip()
+        collector_number = (specimen.get('collector_number', '') or '').strip()
+        # 取得第一個標本館
+        herbarium = ''
+        specimens = specimen.get('specimens', [])
+        if specimens and len(specimens) > 0:
+            # herbarium = specimens[0].get('herbarium', '').strip()
+            herbarium = (specimens[0].get('herbarium') or '').strip()
+        # 建立key
+        # 採集者ID組成字串
+        collector_key = ''
+        if collector_ids:
+            collector_key = ','.join(str(cid) for cid in collector_ids)
+        return (use, collector_key, collector_number, herbarium)
+    def count_fields(specimen: Dict[str, Any]) -> int:
+        """計算記錄中非空欄位的數量，用於判斷資訊豐富度（動態判斷所有欄位）"""
+        count = 0
+        # 動態判斷所有基本欄位（排除巢狀結構欄位）
+        nested_fields = {'collectors', 'specimens', 'source'}  # 排除巢狀結構和內部欄位
+        for key, value in specimen.items():
+            if key not in nested_fields:
+                if value is not None and str(value).strip():
+                    count += 1
+        # 採集者資訊
+        collectors = specimen.get('collectors', [])
+        if collectors:
+            for collector in collectors:
+                if collector and isinstance(collector, dict):
+                    for key, value in collector.items():
+                        if value is not None and str(value).strip():
+                            count += 1
+        # 標本資訊
+        specimens = specimen.get('specimens', [])
+        if specimens:
+            for spec in specimens:
+                if spec and isinstance(spec, dict):
+                    for key, value in spec.items():
+                        if value is not None and str(value).strip():
+                            count += 1
+        return count
+    def should_be_duplicate(spec1: Dict[str, Any], spec2: Dict[str, Any]) -> bool:
+        """判斷兩個標本記錄是否應該被視為重複"""
+        key1 = get_duplicate_key(spec1)
+        key2 = get_duplicate_key(spec2)
+        use1, collector1, number1, herbarium1 = key1
+        use2, collector2, number2, herbarium2 = key2
+        # use必須相同且不為空
+        if not use1 or use1 != use2:
+            return False
+        # 採集者必須相同且不為空
+        if not collector1 or collector1 != collector2:
+            return False
+        # 至少要有採集號或標本館其中一個相同
+        matches = 0
+        if number1 and number2 and number1 == number2:
+            matches += 1
+        if herbarium1 and herbarium2 and herbarium1 == herbarium2:
+            matches += 1
+        # 如果採集號和標本館都為空，就只比較use和採集者
+        if not number1 and not number2 and not herbarium1 and not herbarium2:
+            return True
+        return matches > 0
+    # 收集所有type_specimens
+    all_specimens = []
+    # 從name_df收集
+    name_records = name_df[name_df.taxon_name_id == taxon_name_id]
+    for _, row in name_records.iterrows():
+        type_spec_json = row.get('type_specimens')
+        if type_spec_json:
+            try:
+                specimens = json.loads(type_spec_json)
+                if isinstance(specimens, list):
+                    for specimen in specimens:
+                        if isinstance(specimen, dict):
+                            all_specimens.append({**specimen, "source": "name"})
+            except (json.JSONDecodeError, TypeError):
+                continue
+    # 從prop_df_收集
+    prop_records = prop_df_[prop_df_.taxon_name_id == taxon_name_id]
+    for _, row in prop_records.iterrows():
+        type_spec_json = row.get('type_specimens')
+        if type_spec_json:
+            try:
+                specimens = json.loads(type_spec_json)
+                if isinstance(specimens, list):
+                    for specimen in specimens:
+                        if isinstance(specimen, dict):
+                            all_specimens.append({**specimen, "source": "usage"})
+            except (json.JSONDecodeError, TypeError):
+                continue
+    if not all_specimens:
+        return []
+    # 去重處理
+    result = []
+    processed = set()
+    for i, specimen in enumerate(all_specimens):
+        if i in processed:
+            continue
+        # 找到所有與當前記錄重複的記錄
+        duplicates = [(i, specimen)]
+        for j, other_specimen in enumerate(all_specimens):
+            if j <= i or j in processed:
+                continue
+            if should_be_duplicate(specimen, other_specimen):
+                duplicates.append((j, other_specimen))
+        # 從重複記錄中選擇最好的一個
+        if len(duplicates) > 1:
+            # 排序：name優先，然後資訊多的優先
+            duplicates.sort(key=lambda x: (
+                0 if x[1].get('source') == 'name' else 1,  # name優先
+                -count_fields(x[1])  # 欄位多的優先（負號表示降序）
+            ))
+        # 保留最佳記錄
+        best_specimen = duplicates[0][1]
+        result.append(best_specimen)
+        # 標記所有相關索引為已處理
+        for idx, _ in duplicates:
+            processed.add(idx)
+    return result
+
 
 def get_per_usages(taxon_name_id, rows, prop_df_, name_df, ref_df, conn, backbone_ref_ids, references):
     """

@@ -410,9 +410,9 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references)
         backbone_ref_ids = cursor.fetchall()
         backbone_ref_ids = [b[0] for b in backbone_ref_ids]
         # name_df
-        name_query = 'SELECT id, reference_id, `name` FROM taxon_names WHERE id IN %s'
+        name_query = 'SELECT id, reference_id, `name`, type_specimens FROM taxon_names WHERE id IN %s'
         cursor.execute(name_query, (total_df.taxon_name_id.unique().tolist(),))
-        name_df = pd.DataFrame(cursor.fetchall(), columns=['taxon_name_id', 'name_reference_id', 'name'])
+        name_df = pd.DataFrame(cursor.fetchall(), columns=['taxon_name_id', 'name_reference_id', 'name', 'type_specimens'])
         name_df = name_df.replace({np.nan: None})
         # tmp_checklist_id
         query = '''SELECT max(tmp_checklist_id) from tmp_namespace_usages;'''
@@ -490,7 +490,7 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references)
                     now_dict['properties'] = safe_json_dumps(now_prop)
                     now_dict['parent_taxon_name_id'] = parent_taxon_name_id
                     now_dict['per_usages'] = safe_json_dumps(get_per_usages(rrr.get('taxon_name_id'), rows, prop_df_, name_df, ref_df, conn, backbone_ref_ids, references))
-                    now_dict['type_specimens'] = safe_json_dumps(get_type_specimens(rrr.get('taxon_name_id'), prop_df_))
+                    now_dict['type_specimens'] = safe_json_dumps(deduplicate_type_specimens(taxon_name_id=rrr.get('taxon_name_id'), prop_df_=prop_df_, name_df=name_df))
                 else:
                     now_new_prop = {}
                     now_indications = []
@@ -509,7 +509,7 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references)
                                 merged_indications += ii.split(',')
                         merged_indications = list(set(merged_indications))
                         now_indications = [m for m in merged_indications if m != 'syn. nov.']
-                        now_dict['type_specimens'] = safe_json_dumps(get_type_specimens(rrr.get('taxon_name_id'), prop_df_))
+                        now_dict['type_specimens'] = safe_json_dumps(deduplicate_type_specimens(taxon_name_id=rrr.get('taxon_name_id'), prop_df_=prop_df_, name_df=name_df))
                     now_new_prop['indications'] = now_indications
                     now_dict['properties'] = safe_json_dumps(now_new_prop)
                     now_dict['parent_taxon_name_id'] = None
