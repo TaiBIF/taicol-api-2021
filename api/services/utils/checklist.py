@@ -1199,7 +1199,7 @@ def deduplicate_type_specimens(name_df: pd.DataFrame,
     return result
 
 
-def get_per_usages(taxon_name_id, rows, prop_df_, name_df, ref_df, conn, backbone_ref_ids, references):
+def get_per_usages(taxon_name_id, rows, prop_df_, name_df, ref_df, conn, backbone_ref_ids, references, taxon_status):
     """
     取得特定 taxon_name_id 的 per_usages 資料
     Parameters:
@@ -1231,17 +1231,18 @@ def get_per_usages(taxon_name_id, rows, prop_df_, name_df, ref_df, conn, backbon
                 "reference_id": usage.get('reference_id'),
                 "including_usage_id": usage.get('ru_id')
             })
-    # 4-3 taxon_name_id本身的發表文獻
-    name_rows = name_df[name_df.taxon_name_id == taxon_name_id]
-    if not name_rows.empty:
-        name_reference_id = name_rows.name_reference_id.values[0]
-        if name_reference_id and name_reference_id not in [pp['reference_id'] for pp in per_usages]:
-            per_usages.append({
-                "pro_parte": False,
-                "reference_id": name_reference_id,
-                "is_from_published_ref": True,
-                "including_usage_id": None
-            })
+    if not taxon_status == 'misapplied': # 誤用不該包含本身發表文獻
+        # 4-3 taxon_name_id本身的發表文獻
+        name_rows = name_df[name_df.taxon_name_id == taxon_name_id]
+        if not name_rows.empty:
+            name_reference_id = name_rows.name_reference_id.values[0]
+            if name_reference_id and name_reference_id not in [pp['reference_id'] for pp in per_usages]:
+                per_usages.append({
+                    "pro_parte": False,
+                    "reference_id": name_reference_id,
+                    "is_from_published_ref": True,
+                    "including_usage_id": None
+                })
     if len(per_usages):
         # print(per_usages)
         per_usages = pd.DataFrame(per_usages)

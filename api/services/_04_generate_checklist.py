@@ -489,7 +489,7 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references)
                     now_prop['indications'] = []
                     now_dict['properties'] = safe_json_dumps(now_prop)
                     now_dict['parent_taxon_name_id'] = parent_taxon_name_id
-                    now_dict['per_usages'] = safe_json_dumps(get_per_usages(rrr.get('taxon_name_id'), rows, prop_df_, name_df, ref_df, conn, backbone_ref_ids, references))
+                    now_dict['per_usages'] = safe_json_dumps(get_per_usages(rrr.get('taxon_name_id'), rows, prop_df_, name_df, ref_df, conn, backbone_ref_ids, references, rrr.get('taxon_status')))
                     now_dict['type_specimens'] = safe_json_dumps(deduplicate_type_specimens(taxon_name_id=rrr.get('taxon_name_id'), prop_df_=prop_df_, name_df=name_df))
                 else:
                     now_new_prop = {}
@@ -513,7 +513,7 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references)
                     now_new_prop['indications'] = now_indications
                     now_dict['properties'] = safe_json_dumps(now_new_prop)
                     now_dict['parent_taxon_name_id'] = None
-                    now_dict['per_usages'] = safe_json_dumps(get_per_usages(rrr.get('taxon_name_id'), rows, prop_df_, name_df, ref_df, conn, backbone_ref_ids, references))
+                    now_dict['per_usages'] = safe_json_dumps(get_per_usages(rrr.get('taxon_name_id'), rows, prop_df_, name_df, ref_df, conn, backbone_ref_ids, references, rrr.get('taxon_status')))
                     # now_dict['type_specimens'] = '[]'
                 final_usages.append(now_dict)
         except Exception as e: 
