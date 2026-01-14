@@ -271,7 +271,7 @@ def get_conditioned_solr_search(req):
         query_list.append(f"({' OR '.join(habitat_cond)})")
 
 
-    is_list = ['is_endemic','is_fossil','is_in_taiwan','is_hybrid','including_not_official']
+    is_list = ['is_endemic','is_fossil','is_in_taiwan','is_hybrid']
 
     # TODO 待確認
     for i in is_list:
@@ -279,6 +279,12 @@ def get_conditioned_solr_search(req):
             query_list.append("{}:true".format(i))
         elif req.get(i) == 'false':
             query_list.append("{}:false".format(i))
+
+    if req.get('including_not_official') == 'true':
+        query_list.append("not_official:true")
+
+    elif  req.get('including_not_official') == 'false':
+        query_list.append("not_official:false")
 
     # if reg.get('is_in_taiwn')
     # 預設為true
@@ -343,7 +349,7 @@ def get_conditioned_solr_search(req):
                     WHERE (tn.name = %s OR acn.name_c REGEXP %s) AND t.is_deleted = 0 """
         with conn.cursor() as cursor:
             cursor.execute(query_1, (taxon_group, process_text_variants(taxon_group)))
-            t_id = cursor.fetchall()           
+            t_id = cursor.fetchall()
             if len(t_id):
                 # 可能不只一筆
                 t_str = [ 'path:/.*{}.*/'.format(t[0]) for t in t_id]

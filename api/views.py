@@ -977,320 +977,638 @@ class TaxonView(APIView):
 
 class NameView(APIView):
 
-    # openapi.TYPE_STRING、openapi.TYPE_NUMBER、openapi.TYPE_INTEGER、openapi.TYPE_BOOLEAN、openapi.TYPE_ARRAY、openapi.TYPE_FILE
-
     @swagger_auto_schema(
         operation_summary='取得學名',
-        # operation_description='我是 GET 的說明',
         manual_parameters=[
-            openapi.Parameter(
-                name='name_id',
-                in_=openapi.IN_QUERY,
-                description='學名ID',
-                type=openapi.TYPE_INTEGER
-            ),
-            openapi.Parameter(
-                name='scientific_name',
-                in_=openapi.IN_QUERY,
-                description='學名',
-                type=openapi.TYPE_STRING
-            ),
-            openapi.Parameter(
-                name='taxon_group',
-                in_=openapi.IN_QUERY,
-                description='分類群',
-                type=openapi.TYPE_STRING
-            ),
-            openapi.Parameter(
-                name='rank',
-                in_=openapi.IN_QUERY,
-                description='階層',
-                type=openapi.TYPE_STRING
-            ),
-            openapi.Parameter(
-                name='created_at',
-                in_=openapi.IN_QUERY,
-                description='建立日期',
-                type=openapi.FORMAT_DATE
-            ),
-            openapi.Parameter(
-                name='updated_at',
-                in_=openapi.IN_QUERY,
-                description='更新日期',
-                type=openapi.FORMAT_DATE
-            ),
-            openapi.Parameter(
-                name='limit',
-                in_=openapi.IN_QUERY,
-                description='每頁限制筆數',
-                type=openapi.TYPE_INTEGER
-            ),
-            openapi.Parameter(
-                name='offset',
-                in_=openapi.IN_QUERY,
-                description='指定每頁起始編號',
-                type=openapi.TYPE_INTEGER
-            ),
+            openapi.Parameter(name='name_id', in_=openapi.IN_QUERY, description='學名ID', type=openapi.TYPE_INTEGER),
+            openapi.Parameter(name='scientific_name', in_=openapi.IN_QUERY, description='學名', type=openapi.TYPE_STRING),
+            openapi.Parameter(name='taxon_group', in_=openapi.IN_QUERY, description='分類群', type=openapi.TYPE_STRING),
+            openapi.Parameter(name='rank', in_=openapi.IN_QUERY, description='階層', type=openapi.TYPE_STRING),
+            openapi.Parameter(name='created_at', in_=openapi.IN_QUERY, description='建立日期', type=openapi.FORMAT_DATE),
+            openapi.Parameter(name='updated_at', in_=openapi.IN_QUERY, description='更新日期', type=openapi.FORMAT_DATE),
+            openapi.Parameter(name='limit', in_=openapi.IN_QUERY, description='每頁限制筆數', type=openapi.TYPE_INTEGER),
+            openapi.Parameter(name='offset', in_=openapi.IN_QUERY, description='指定每頁起始編號', type=openapi.TYPE_INTEGER),
         ]
     )
     def get(self, request, *args, **krgs):
-        # print(type(request.GET.get('limit', 20)), request.GET.get('page', 1))
         try:
             limit = int(request.GET.get('limit', 20))
             offset = int(request.GET.get('offset', 0))
-        except Exception as er:
-            print(er)
-            limit, offset = 20, 0  # 如果有錯的話直接改成預設值
+        except Exception:
+            limit, offset = 20, 0
+
+        # 限制最大筆數
+        limit = 300 if limit > 300 else limit
+
+        # 參數驗證
+        allowed_params = {'name_id', 'scientific_name', 'common_name', 'rank', 'updated_at', 'created_at', 'taxon_group', 'limit', 'offset'}
+        if request.GET.keys() and not set(request.GET.keys()) <= allowed_params:
+            return HttpResponse(json.dumps({"status": {"code": 400, "message": "Bad Request: Unsupported parameters"}}), content_type="application/json")
+
+        name_id = request.GET.get('name_id', '').strip()
+        scientific_name = request.GET.get('scientific_name', '').strip()
+        scientific_name_cleaned = remove_rank_char(scientific_name)
+        updated_at = request.GET.get('updated_at', '').strip().strip('"').strip("'")
+        created_at = request.GET.get('created_at', '').strip().strip('"').strip("'")
+        taxon_group = request.GET.get('taxon_group', '').strip()
+        rank = request.GET.get('rank')
+
+        # SQL 初始化
+        cte_sql = ""
+        join_sql = ""
+        where_sql = " WHERE tn.is_publish = 1 "
+        sql_params = []
+
+        conn = pymysql.connect(**db_settings)
+
         try:
-            if request.GET.keys() and not set(list(request.GET.keys())) <= set(['name_id', 'scientific_name', 'common_name', 'rank', 'updated_at', 'created_at', 'taxon_group', 'limit', 'offset']):
-                response = {"status": {"code": 400, "message": "Bad Request: Unsupported parameters"}}
-                return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
-            # 如果有重複的參數，只考慮最後面的那個 (default)
-            name_id = request.GET.get('name_id', '').strip()
-            scientific_name = request.GET.get('scientific_name', '').strip()
-            scientific_name = remove_rank_char(scientific_name)
-
-            updated_at = request.GET.get('updated_at', '').strip().strip('"').strip("'")
-            created_at = request.GET.get('created_at', '').strip().strip('"').strip("'")
-            taxon_group = request.GET.get('taxon_group', '').strip()
-            limit = 300 if limit > 300 else limit  # 最大值 300
-
-            # # update names
-            # update_names()
-            # update_citations()
-
-            conn = pymysql.connect(**db_settings)
-            # 這邊的namecode concat應該不會超過上限 維持原本寫法
-            base_query = "SELECT * FROM taxon_names tn "
-            query = "SELECT tn.id, tn.rank_id, tn.name, an.name_author, \
-                            tn.original_taxon_name_id, tn.note, tn.created_at, tn.updated_at, \
-                            n.name, JSON_EXTRACT(tn.properties,'$.is_hybrid'), \
-                            CONCAT_WS(' ', c.author, c.content), \
-                            tn.properties ->> '$.type_name', \
-                            tn.properties ->> '$.latin_genus', \
-                            tn.properties ->> '$.latin_s1',\
-                            tn.properties ->> '$.species_layers',\
-                            an.formatted_name, GROUP_CONCAT(anc.namecode), tn.deleted_at\
-                            FROM base_query AS tn \
-                            JOIN nomenclatures n ON tn.nomenclature_id = n.id \
-                            LEFT JOIN api_namecode anc ON tn.id = anc.taxon_name_id \
-                            LEFT JOIN api_names an ON tn.id = an.taxon_name_id \
-                            LEFT JOIN api_citations c ON tn.reference_id = c.reference_id \
-                            GROUP BY tn.id ORDER BY tn.id "
+            # -----------------------------------------------------------
+            # 1. 建構查詢條件 (Where Clause & CTE)
+            # -----------------------------------------------------------
             
-            count_query = "SELECT COUNT(*) FROM taxon_names tn"
+            # Taxon Group (階層遞迴)
+            if taxon_group and not name_id:
+                with conn.cursor() as cursor:
+                    # 先找 Root
+                    cursor.execute("SELECT id FROM taxon_names WHERE name = %s AND is_publish = 1 LIMIT 1", (taxon_group,))
+                    row = cursor.fetchone()
+                
+                if not row:
+                    response = {"status": {"code": 200, "message": "Success"}, "info": {"total": 0, "limit": limit, "offset": offset}, "data": []}
+                    return HttpResponse(json.dumps(response, ensure_ascii=False, cls=DateTimeEncoder), content_type="application/json,charset=utf-8")
+                
+                root_id = row[0]
+                
+                # CTE: 加上 DISTINCT 確保遞迴中不重複，is_title != 1 排除純標題
+                cte_sql = f"""
+                WITH RECURSIVE hierarchy_scope (taxon_name_id) AS (
+                    SELECT {root_id} 
+                    UNION DISTINCT
+                    SELECT ru.taxon_name_id 
+                    FROM reference_usages ru
+                    JOIN hierarchy_scope hs ON ru.parent_taxon_name_id = hs.taxon_name_id
+                    WHERE ru.deleted_at IS NULL 
+                      AND ru.is_title != 1 
+                )
+                """
+                join_sql = " JOIN hierarchy_scope hs ON tn.id = hs.taxon_name_id "
 
-            conditions = ['tn.is_publish = 1']
-
+            # 其他篩選條件
+            if name_id:
+                where_sql += " AND tn.id = %s "
+                sql_params.append(name_id)
+            elif scientific_name:
+                where_sql += " AND (tn.search_name = %s OR tn.name = %s) "
+                sql_params.extend([scientific_name_cleaned, scientific_name])
+            
             if updated_at:
-                if not validate(updated_at):
-                    response = {"status": {"code": 400, "message": "Bad Request: Incorrect DATE(updated_at) value"}}
-                    return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
-                conditions += [f"date(tn.updated_at) > '{updated_at}'"]
-            if created_at:
-                if not validate(created_at):
-                    response = {"status": {"code": 400, "message": "Bad Request: Incorrect DATE(created_at) value"}}
-                    return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
-                conditions += [f"date(tn.created_at) > '{created_at}'"]
+                if not validate(updated_at): raise ValueError("Bad Date")
+                where_sql += " AND date(tn.updated_at) > %s "
+                sql_params.append(updated_at)
 
-            if rank := request.GET.get('rank'):
+            if created_at:
+                if not validate(created_at): raise ValueError("Bad Date")
+                where_sql += " AND date(tn.created_at) > %s "
+                sql_params.append(created_at)
+
+            if rank:
                 try:
                     rank_id = list(rank_map.keys())[list(rank_map.values()).index(rank)]
-                    conditions += [f'tn.rank_id = {rank_id}']
+                    where_sql += " AND tn.rank_id = %s "
+                    sql_params.append(rank_id)
                 except:
-                    response = {"status": {"code": 400, "message": "Bad Request: Incorrect rank"}}
-                    return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
+                    raise ValueError("Bad Rank")
 
-            if name_id:  # 不考慮其他條件
-                base_query = f"{base_query} WHERE tn.id = '{name_id}'"
-                count_query = f"{count_query} WHERE tn.id = '{name_id}'"
-            elif scientific_name:  # 不考慮分類群, scientific_name, updated_at, created_at
-                base_query = f"{base_query} WHERE (tn.search_name = '{remove_rank_char(scientific_name)}' OR tn.name = '{scientific_name}') "
-                count_query = f"{count_query}  WHERE (tn.search_name = '{remove_rank_char(scientific_name)}' OR tn.name = '{scientific_name}') "
-                for c in conditions:
-                    base_query += " AND " + c
-                    count_query += " AND " + c
-            elif taxon_group:
-                # 先由 學名 / 中文名 找出符合的name_id
-                query_1 = f"SELECT id FROM taxon_names WHERE name = '{taxon_group}' AND is_publish = 1"
-                # conn = pymysql.connect(**db_settings)
-                results = ()
-                with conn.cursor() as cursor:
-                    cursor.execute(query_1)
-                    results = cursor.fetchall()
-                # find all child id
-                all_child_results = ()
-                for r in results:  # could be more than 1
-                    current_id = r[0]
-                    # get recursive names
-                    query_taxon_group = f"with recursive cte (id, taxon_name_id, parent_taxon_name_id) as ( \
-                                        select     id, taxon_name_id,parent_taxon_name_id \
-                                        from       reference_usages \
-                                        where      parent_taxon_name_id = {current_id} and is_title != 1 and deleted_at is null \
-                                        union all \
-                                        select     ru.id, ru.taxon_name_id, ru.parent_taxon_name_id \
-                                        from       reference_usages ru \
-                                        inner join cte on ru.parent_taxon_name_id = cte.taxon_name_id \
-                                        where      ru.deleted_at is null \
-                                        ) \
-                                        select taxon_name_id from cte"
-                    # conn = pymysql.connect(**db_settings)
-                    with conn.cursor() as cursor:
-                        cursor.execute(query_taxon_group)
-                        child_results = cursor.fetchall()
-                        all_child_results += child_results
-
-                all_results = results + all_child_results
-
-                if all_results:
-                    base_query = f"{base_query} WHERE tn.id IN {str(tuple((item[0] for item in all_results)))}"
-                    count_query = f"{count_query} WHERE tn.id IN {str(tuple((item[0] for item in all_results)))}"
-                    for c in conditions:
-                        base_query += " AND " + c
-                        count_query += " AND " + c
-                else:
-                    # 沒有結果的狀態
-                    response = {"status": {"code": 200, "message": "Success"},
-                                "info": {"total": 0, "limit": limit, "offset": offset}, "data": []}
-                    return HttpResponse(json.dumps(response, ensure_ascii=False, cls=DateTimeEncoder), content_type="application/json,charset=utf-8")
-                # print('taxon_group: ', query)
-            else:
-                for l in range(len(conditions)):
-                    if l == 0:
-                        base_query = f"{base_query} WHERE {conditions[l]}"
-                        count_query = f"{count_query} WHERE {conditions[l]}"
-                    else:
-                        query += f' AND {conditions[l]}'
-                        count_query += f" AND {conditions[l]}"
-                # print('else: ', query)
-            print(base_query)
+            # -----------------------------------------------------------
+            # 2. 執行查詢 (Two-Step Strategy)
+            # -----------------------------------------------------------
+            
             with conn.cursor() as cursor:
-                query = f'WITH base_query AS ({base_query} ORDER BY tn.id LIMIT {limit} OFFSET {offset} ) {query}'  # 只處理限制筆數
-                cursor.execute(query)
-                df = cursor.fetchall()
-                df = [list(item) for item in df]
-                df = pd.DataFrame(df, columns=['name_id', 'rank', 'simple_name', 'name_author', 'original_name_id', 'note',
-                                               'created_at', 'updated_at', 'nomenclature_name', 'is_hybrid', 'protologue',
-                                               'type_name_id', 'latin_genus', 'latin_s1', 'species_layers', 'formatted_name', 'namecode', 'is_deleted'])
-                cursor.execute(count_query)
-                len_total = cursor.fetchall()[0][0]
+                # [Step A] 計算總筆數 (Count)
+                # 使用 COUNT(DISTINCT tn.id) 確保總數正確
+                count_query = f"{cte_sql} SELECT COUNT(DISTINCT tn.id) FROM taxon_names tn {join_sql} {where_sql}"
+                cursor.execute(count_query, sql_params)
+                len_total = cursor.fetchone()[0]
 
-                # only rank >= 34 has 物種學名分欄 & original_name_id
-                if len(df):
-                    df.loc[df['rank'] < 34, 'name'] = '{}'
-                    df.loc[df['rank'] < 34, 'original_name_id'] = None
-                    df['rank'] = df['rank'].apply(lambda x: rank_map[x])
+                if len_total == 0:
+                     response = {"status": {"code": 200, "message": "Success"}, "info": {"total": 0, "limit": limit, "offset": offset}, "data": []}
+                     return HttpResponse(json.dumps(response, ensure_ascii=False, cls=DateTimeEncoder), content_type="application/json,charset=utf-8")
 
-                # find hybrid_parent
-                df['hybrid_parent'] = None
+                # [Step B] 取得當頁 ID (Get Page IDs)
+                # 這裡只查 ID，且用 DISTINCT 保證 Limit 切割出來的數量絕對精準
+                page_ids_query = f"""
+                    {cte_sql}
+                    SELECT DISTINCT tn.id 
+                    FROM taxon_names tn 
+                    {join_sql} 
+                    {where_sql} 
+                    ORDER BY tn.id 
+                    LIMIT {limit} OFFSET {offset}
+                """
+                cursor.execute(page_ids_query, sql_params)
+                page_ids_rows = cursor.fetchall()
+                
+                # 將 tuple result 轉為 list [1, 2, 3]
+                target_ids = [r[0] for r in page_ids_rows]
 
-                for h in df[['is_hybrid', 'name_id']].index:
-                    if df.loc[h]['is_hybrid'] == 'true':
-                        # 這邊的namecode concat應該不會超過上限 維持原本寫法
-                        query_hybrid_parent = f"SELECT GROUP_CONCAT( CONCAT(tn.name, ' ',tn.formatted_authors) SEPARATOR ' × ' ) FROM taxon_name_hybrid_parent AS tnhp \
-                                                JOIN taxon_names AS tn ON tn.id = tnhp.parent_taxon_name_id \
-                                                WHERE tnhp.taxon_name_id = {df.loc[h]['name_id']} AND tn.is_publish = 1 \
-                                                GROUP BY tnhp.taxon_name_id"
+                # [Step C] 取得詳細資料 (Get Details)
+                # 只有當有 ID 時才執行
+                if target_ids:
+                    # 將 ID 列表轉為字串給 IN 使用，因為數量最多 300，這樣做是安全的
+                    ids_str = ','.join(map(str, target_ids))
+                    
+                    # 修正：tn.name AS simple_name 以配合 Pandas Column
+                    select_fields = """
+                        tn.id, tn.rank_id, tn.name AS simple_name, an.name_author,
+                        tn.original_taxon_name_id, tn.note, tn.created_at, tn.updated_at,
+                        n.name as nomenclature_name, 
+                        tn.properties ->> '$.is_hybrid' as is_hybrid_str,
+                        tn.properties ->> '$.protologue' as protologue,
+                        tn.properties ->> '$.type_name' as type_name_json,
+                        tn.properties ->> '$.latin_genus' as latin_genus,
+                        tn.properties ->> '$.latin_s1' as latin_s1,
+                        tn.properties ->> '$.species_layers' as species_layers,
+                        an.formatted_name, 
+                        GROUP_CONCAT(anc.namecode) as namecodes, 
+                        tn.deleted_at
+                    """
+
+                    main_query = f"""
+                        SELECT {select_fields}
+                        FROM taxon_names tn
+                        JOIN nomenclatures n ON tn.nomenclature_id = n.id
+                        LEFT JOIN api_namecode anc ON tn.id = anc.taxon_name_id
+                        LEFT JOIN api_names an ON tn.id = an.taxon_name_id
+                        WHERE tn.id IN ({ids_str})
+                        GROUP BY tn.id 
+                        ORDER BY tn.id
+                    """
+                    
+                    cursor.execute(main_query)
+                    data_rows = cursor.fetchall()
+                else:
+                    data_rows = []
+
+                # -----------------------------------------------------------
+                # 3. Pandas 資料處理 (向量化處理)
+                # -----------------------------------------------------------
+                
+                columns = ['name_id', 'rank', 'simple_name', 'name_author', 'original_name_id', 'note', 
+                           'created_at', 'updated_at', 'nomenclature_name', 'is_hybrid', 'protologue',
+                           'type_name_id', 'latin_genus', 'latin_s1', 'species_layers', 'formatted_name', 
+                           'namecode', 'is_deleted']
+                
+                df = pd.DataFrame(list(data_rows), columns=columns)
+
+                if not df.empty:
+                    # [優化] 使用 Pandas 處理資料，避免 Python Loop
+                    
+                    # 轉換日期
+                    df['created_at'] = pd.to_datetime(df['created_at']).dt.strftime('%Y-%m-%d')
+                    df['updated_at'] = pd.to_datetime(df['updated_at']).dt.strftime('%Y-%m-%d')
+                    
+                    # 轉換 Boolean
+                    df['is_deleted'] = df['is_deleted'].notna()
+                    df['is_hybrid'] = df['is_hybrid'].replace({'false': False, 'true': True})
+
+                    # 處理 Rank 顯示
+                    df['rank'] = pd.to_numeric(df['rank'], errors='coerce')
+                    mask_rank_low = df['rank'] < 34
+                    df['rank'] = df['rank'].map(rank_map).fillna(df['rank'])
+
+                    # 處理 Name JSON 解析 (Apply)
+                    def process_name_column(row):
+                        name_dict = {'latin_genus': row.get('latin_genus'), 'latin_s1': row.get('latin_s1')}
+                        s_layers = row.get('species_layers')
+                        
+                        if s_layers:
+                            try:
+                                if isinstance(s_layers, str):
+                                    layers = json.loads(s_layers)
+                                else:
+                                    layers = s_layers
+                                count = 2
+                                for s in layers:
+                                    if s.get('rank_abbreviation') and s.get('latin_name'):
+                                        name_dict[f's{count}_rank'] = s.get('rank_abbreviation')
+                                        name_dict[f'latin_s{count}'] = s.get('latin_name')
+                                        count += 1
+                            except:
+                                pass
+                        
+                        final_name = {k: v for k, v in name_dict.items() if v and v != 'null'}
+                        
+                        # Type Name ID 處理
+                        t_id = row.get('type_name_id')
+                        try:
+                            t_id = int(t_id) if t_id else None
+                        except:
+                            t_id = None
+                        return pd.Series([final_name, t_id])
+
+                    df[['name', 'type_name_id_processed']] = df.apply(process_name_column, axis=1)
+                    df['type_name_id'] = df['type_name_id_processed']
+
+                    # Rank 低於 34 的清理
+                    df.loc[mask_rank_low, 'name'] = "{}"
+                    df.loc[mask_rank_low, 'original_name_id'] = None
+
+                    # 確保 ID 格式
+                    for c in ['name_id', 'original_name_id']:
+                        df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0).astype('int64').replace(0, None)
+
+                    # [優化] Hybrid Parent 批量查詢
+                    hybrid_ids = df[df['is_hybrid'] == True]['name_id'].tolist()
+                    hybrid_map = {}
+                    if hybrid_ids:
+                        ids_str = ','.join(map(str, hybrid_ids))
+                        q_hybrid = f"""
+                            SELECT tnhp.taxon_name_id, GROUP_CONCAT(CONCAT(tn.name, ' ', tn.formatted_authors) SEPARATOR ' × ')
+                            FROM taxon_name_hybrid_parent tnhp
+                            JOIN taxon_names tn ON tn.id = tnhp.parent_taxon_name_id
+                            WHERE tnhp.taxon_name_id IN ({ids_str}) AND tn.is_publish = 1
+                            GROUP BY tnhp.taxon_name_id
+                        """
                         with conn.cursor() as cursor:
-                            cursor.execute(query_hybrid_parent)
-                            hybrid_name_result = cursor.fetchall()
-                        if hybrid_name_result:
-                            df.loc[df.name_id == df.loc[h]['name_id'], 'hybrid_parent'] = hybrid_name_result[0]
+                            cursor.execute(q_hybrid)
+                            for rid, name_str in cursor.fetchall():
+                                hybrid_map[rid] = name_str
+                    df['hybrid_parent'] = df['name_id'].map(hybrid_map)
 
-                # organize results
-                df = df.replace({np.nan: None})
+                    # Solr 查詢 (Taxon Status)
+                    df['taxon'] = '[]'
+                    if not df.empty:
+                        try:
+                            # 查詢 Solr
+                            query_solr = {
+                                "query": "*:*", "offset": 0, "limit": len(df),
+                                "filter": [f'taxon_name_id:({" OR ".join(df.name_id.astype(str))})', 'is_deleted:false'],
+                                "fields": ['taxon_id', 'status', 'is_in_taiwan', 'taxon_name_id']
+                            }
+                            resp = requests.post(f'{SOLR_PREFIX}taxa/select?', json=query_solr).json()
+                            solr_docs = resp.get('response', {}).get('docs', [])
 
-                if len(df):
+                            if solr_docs:
+                                t_df = pd.DataFrame(solr_docs)
+                                t_df['taxon_name_id'] = t_df['taxon_name_id'].astype(int)
+                                
+                                # 定義排序與狀態 mapping
+                                def process_solr_group(g):
+                                    custom_dict = {'accepted': 0, 'not-accepted': 1, 'misapplied': 2}
+                                    g = g.copy()
+                                    g['sort_val'] = g['status'].map(custom_dict).fillna(9)
+                                    g = g.sort_values(['sort_val', 'is_in_taiwan'], ascending=[True, False])
+                                    g['is_in_taiwan'] = g['is_in_taiwan'].replace({0: False, 1: True, '0': False, '1': True, '2': False, None: False})
+                                    result = g[['taxon_id', 'status', 'is_in_taiwan']].rename(columns={'status': 'taicol_name_status'}).to_dict('records')
+                                    return result
 
-                    # 加上taxon
+                                taxon_map = t_df.groupby('taxon_name_id').apply(process_solr_group).to_dict()
+                                # 注意：這裡要將 dict 轉回 json string 還是 list，依前端需求，原程式碼是 List of Dicts
+                                df['taxon'] = df['name_id'].map(taxon_map).fillna(pd.Series([[]] * len(df)))
+                        except Exception as e:
+                            print(f"Solr Error: {e}")
 
-                    query = { "query": "*:*",
-                        "offset": 0,
-                        "limit": 1000000,
-                        "filter": ['taxon_name_id:({})'.format(' OR '.join([str(n) for n in df.name_id.to_list()])), 'is_deleted:false', ],
-                        "fields": ['taxon_id', 'status', 'is_in_taiwan','taxon_name_id']
-                        }
+                    # 最終欄位整理
+                    df = df.replace({np.nan: None})
+                    final_columns = ['name_id', 'nomenclature_name', 'rank', 'simple_name', 'name_author', 
+                                     'formatted_name', 'name', 'original_name_id', 'is_hybrid', 'hybrid_parent', 
+                                     'protologue', 'type_name_id', 'namecode', 'taxon', 'is_deleted', 'created_at', 'updated_at']
                     
-                    query_req = json.dumps(query)
+                    data_result = df[[c for c in final_columns if c in df.columns]].to_dict('records')
+                else:
+                    data_result = []
 
-                    resp = requests.post(f'{SOLR_PREFIX}taxa/select?', data=query_req, headers={'content-type': "application/json" })
-                    resp = resp.json()
+            response = {
+                "status": {"code": 200, "message": "Success"},
+                "info": {"total": len_total, "limit": limit, "offset": offset}, 
+                "data": data_result
+            }
 
-                    # print(resp)
-                    taxon_df = pd.DataFrame(resp['response']['docs'])
-                    if len(taxon_df):
-                        taxon_df['taxon_name_id'] = taxon_df['taxon_name_id'].astype(int)
-                        taxon_df = taxon_df.rename(columns={'taxon_name_id': 'name_id'})
-                        taxon_df = taxon_df.groupby('name_id').apply(lambda x: x[['taxon_id', 'status', 'is_in_taiwan']].to_dict('records')).reset_index(name='taxon')
-
-                        for i in taxon_df.index:
-                            row = taxon_df.iloc[i]
-                            # taxon_tmp = json.loads(row.taxon)
-                            taxon_tmp = pd.DataFrame(row.taxon)
-                            # 排序規則： 
-                            # Taiwan+有效 accepted
-                            # Taiwan+無效 not-accepted
-                            # Taiwan+誤用 misapplied
-                            custom_dict = {'accepted': 0, 'not-accepted': 1, 'misapplied': 2}
-                            taxon_tmp = taxon_tmp.sort_values(by=['status'], key=lambda x: x.map(custom_dict)).sort_values(by='is_in_taiwan',ascending=False)
-                            taxon_tmp['is_in_taiwan'] = taxon_tmp['is_in_taiwan'].replace({0: False, 1: True, '0': False, '1': True, '2': False, None: False})
-                            taxon_tmp = taxon_tmp.rename(columns={'status': 'taicol_name_status'})
-                            taxon_tmp = taxon_tmp[['taxon_id','taicol_name_status','is_in_taiwan']]
-                            taxon_df.loc[i,'taxon'] = taxon_tmp.to_json(orient='records') 
-
-                    if len(taxon_df):
-                        df = df.merge(taxon_df, how='left')    
-                    else:
-                        df['taxon'] = '[]'
-                    
-
-                    df['taxon'] = df['taxon'].replace({np.nan:'[]'})
-                    df['taxon'] = df['taxon'].apply(json.loads)
-
-                    # 日期格式 yy-mm-dd
-                    # df['created_at'] = df.created_at.dt.strftime('%Y-%m-%d')
-                    # df['updated_at'] = df.updated_at.dt.strftime('%Y-%m-%d')
-                    df['created_at'] = df.created_at.apply(lambda x: str(x).split(' ')[0])
-                    df['updated_at'] = df.updated_at.apply(lambda x: str(x).split(' ')[0])
-
-                    # 是否已刪除
-                    df['is_deleted'] = df.is_deleted.apply(lambda x: True if x else False)
-
-                    # remove null/empty/None element in 'name' json
-                    for n in df.index:
-                        name = {'latin_genus': df.latin_genus[n], 'latin_s1': df.latin_s1[n]}
-                        count = 2
-                        for s in json.loads(df.species_layers[n]):
-                            if s.get('rank_abbreviation') and s.get('latin_name'):
-                                name.update({f's{count}_rank': s.get('rank_abbreviation'), f'latin_s{count}': s.get('latin_name')})
-                                count += 1
-                        name = {k: v for k, v in name.items() if v and v != 'null'}
-                        df.loc[n, 'name'] = [name]
-                        if df.original_name_id[n]:
-                            df.loc[n, 'original_name_id'] = int(df.original_name_id[n])
-                        if df.type_name_id[n]:
-                            df.loc[n, 'type_name_id'] = int(df.type_name_id[n])
-                        else:
-                            df.loc[n, 'type_name_id'] = None
-
-                    # subset & rename columns
-                    df = df[['name_id', 'nomenclature_name', 'rank', 'simple_name', 'name_author', 'formatted_name', 'name', 'original_name_id',
-                            'is_hybrid', 'hybrid_parent', 'protologue', 'type_name_id', 'namecode', 'taxon', 'is_deleted', 'created_at', 'updated_at']]
-
-                    df['is_hybrid'] = df['is_hybrid'].replace('false', False).replace('true', True)
-                    df.loc[df['name_author'] == "", 'name_author'] = None
-                    df = df.replace({np.nan: None, '': None})
-                    df[['name_id','original_name_id','type_name_id']] = df[['name_id','original_name_id','type_name_id']].replace({None: 0, np.nan: 0})
-                    df[['name_id','original_name_id','type_name_id']] = df[['name_id','original_name_id','type_name_id']].replace({np.nan: 0}).astype('int64').replace({0: None})
-                response = {"status": {"code": 200, "message": "Success"},
-                            "info": {"total": len_total, "limit": limit, "offset": offset}, "data": df.to_dict('records')}
         except Exception as er:
-            print(er)
+            import traceback
+            traceback.print_exc()
             response = {"status": {"code": 500, "message": "Unexpected Error"}}
 
-
         return HttpResponse(json.dumps(response, ensure_ascii=False, cls=DateTimeEncoder), content_type="application/json,charset=utf-8")
-        # https://www.django-rest-framework.org/api-guide/exceptions/
+
+
+# class NameViewOld(APIView):
+
+#     # openapi.TYPE_STRING、openapi.TYPE_NUMBER、openapi.TYPE_INTEGER、openapi.TYPE_BOOLEAN、openapi.TYPE_ARRAY、openapi.TYPE_FILE
+
+#     @swagger_auto_schema(
+#         operation_summary='取得學名',
+#         # operation_description='我是 GET 的說明',
+#         manual_parameters=[
+#             openapi.Parameter(
+#                 name='name_id',
+#                 in_=openapi.IN_QUERY,
+#                 description='學名ID',
+#                 type=openapi.TYPE_INTEGER
+#             ),
+#             openapi.Parameter(
+#                 name='scientific_name',
+#                 in_=openapi.IN_QUERY,
+#                 description='學名',
+#                 type=openapi.TYPE_STRING
+#             ),
+#             openapi.Parameter(
+#                 name='taxon_group',
+#                 in_=openapi.IN_QUERY,
+#                 description='分類群',
+#                 type=openapi.TYPE_STRING
+#             ),
+#             openapi.Parameter(
+#                 name='rank',
+#                 in_=openapi.IN_QUERY,
+#                 description='階層',
+#                 type=openapi.TYPE_STRING
+#             ),
+#             openapi.Parameter(
+#                 name='created_at',
+#                 in_=openapi.IN_QUERY,
+#                 description='建立日期',
+#                 type=openapi.FORMAT_DATE
+#             ),
+#             openapi.Parameter(
+#                 name='updated_at',
+#                 in_=openapi.IN_QUERY,
+#                 description='更新日期',
+#                 type=openapi.FORMAT_DATE
+#             ),
+#             openapi.Parameter(
+#                 name='limit',
+#                 in_=openapi.IN_QUERY,
+#                 description='每頁限制筆數',
+#                 type=openapi.TYPE_INTEGER
+#             ),
+#             openapi.Parameter(
+#                 name='offset',
+#                 in_=openapi.IN_QUERY,
+#                 description='指定每頁起始編號',
+#                 type=openapi.TYPE_INTEGER
+#             ),
+#         ]
+#     )
+#     def get(self, request, *args, **krgs):
+#         # print(type(request.GET.get('limit', 20)), request.GET.get('page', 1))
+#         try:
+#             limit = int(request.GET.get('limit', 20))
+#             offset = int(request.GET.get('offset', 0))
+#         except Exception as er:
+#             print(er)
+#             limit, offset = 20, 0  # 如果有錯的話直接改成預設值
+#         try:
+#             if request.GET.keys() and not set(list(request.GET.keys())) <= set(['name_id', 'scientific_name', 'common_name', 'rank', 'updated_at', 'created_at', 'taxon_group', 'limit', 'offset']):
+#                 response = {"status": {"code": 400, "message": "Bad Request: Unsupported parameters"}}
+#                 return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
+#             # 如果有重複的參數，只考慮最後面的那個 (default)
+#             name_id = request.GET.get('name_id', '').strip()
+#             scientific_name = request.GET.get('scientific_name', '').strip()
+#             scientific_name = remove_rank_char(scientific_name)
+
+#             updated_at = request.GET.get('updated_at', '').strip().strip('"').strip("'")
+#             created_at = request.GET.get('created_at', '').strip().strip('"').strip("'")
+#             taxon_group = request.GET.get('taxon_group', '').strip()
+#             limit = 300 if limit > 300 else limit  # 最大值 300
+
+#             # # update names
+#             # update_names()
+#             # update_citations()
+
+#             conn = pymysql.connect(**db_settings)
+#             # 這邊的namecode concat應該不會超過上限 維持原本寫法
+#             base_query = "SELECT * FROM taxon_names tn "
+#             query = "SELECT tn.id, tn.rank_id, tn.name, an.name_author, \
+#                             tn.original_taxon_name_id, tn.note, tn.created_at, tn.updated_at, \
+#                             n.name, JSON_EXTRACT(tn.properties,'$.is_hybrid'), \
+#                             CONCAT_WS(' ', c.author, c.content), \
+#                             tn.properties ->> '$.type_name', \
+#                             tn.properties ->> '$.latin_genus', \
+#                             tn.properties ->> '$.latin_s1',\
+#                             tn.properties ->> '$.species_layers',\
+#                             an.formatted_name, GROUP_CONCAT(anc.namecode), tn.deleted_at\
+#                             FROM base_query AS tn \
+#                             JOIN nomenclatures n ON tn.nomenclature_id = n.id \
+#                             LEFT JOIN api_namecode anc ON tn.id = anc.taxon_name_id \
+#                             LEFT JOIN api_names an ON tn.id = an.taxon_name_id \
+#                             LEFT JOIN api_citations c ON tn.reference_id = c.reference_id \
+#                             GROUP BY tn.id ORDER BY tn.id "
+            
+#             count_query = "SELECT COUNT(*) FROM taxon_names tn"
+
+#             conditions = ['tn.is_publish = 1']
+
+#             if updated_at:
+#                 if not validate(updated_at):
+#                     response = {"status": {"code": 400, "message": "Bad Request: Incorrect DATE(updated_at) value"}}
+#                     return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
+#                 conditions += [f"date(tn.updated_at) > '{updated_at}'"]
+#             if created_at:
+#                 if not validate(created_at):
+#                     response = {"status": {"code": 400, "message": "Bad Request: Incorrect DATE(created_at) value"}}
+#                     return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
+#                 conditions += [f"date(tn.created_at) > '{created_at}'"]
+
+#             if rank := request.GET.get('rank'):
+#                 try:
+#                     rank_id = list(rank_map.keys())[list(rank_map.values()).index(rank)]
+#                     conditions += [f'tn.rank_id = {rank_id}']
+#                 except:
+#                     response = {"status": {"code": 400, "message": "Bad Request: Incorrect rank"}}
+#                     return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
+
+#             if name_id:  # 不考慮其他條件
+#                 base_query = f"{base_query} WHERE tn.id = '{name_id}'"
+#                 count_query = f"{count_query} WHERE tn.id = '{name_id}'"
+#             elif scientific_name:  # 不考慮分類群, scientific_name, updated_at, created_at
+#                 base_query = f"{base_query} WHERE (tn.search_name = '{remove_rank_char(scientific_name)}' OR tn.name = '{scientific_name}') "
+#                 count_query = f"{count_query}  WHERE (tn.search_name = '{remove_rank_char(scientific_name)}' OR tn.name = '{scientific_name}') "
+#                 for c in conditions:
+#                     base_query += " AND " + c
+#                     count_query += " AND " + c
+#             # TODO 這邊要修改 不然資料庫無法負荷
+#             elif taxon_group:
+#                 # 先由 學名 / 中文名 找出符合的name_id
+#                 query_1 = f"SELECT id FROM taxon_names WHERE name = '{taxon_group}' AND is_publish = 1"
+#                 # conn = pymysql.connect(**db_settings)
+#                 results = ()
+#                 with conn.cursor() as cursor:
+#                     cursor.execute(query_1)
+#                     results = cursor.fetchall()
+#                 # find all child id
+#                 all_child_results = ()
+#                 for r in results:  # could be more than 1
+#                     current_id = r[0]
+#                     # get recursive names
+#                     query_taxon_group = f"with recursive cte (id, taxon_name_id, parent_taxon_name_id) as ( \
+#                                         select     id, taxon_name_id,parent_taxon_name_id \
+#                                         from       reference_usages \
+#                                         where      parent_taxon_name_id = {current_id} and is_title != 1 and deleted_at is null \
+#                                         union all \
+#                                         select     ru.id, ru.taxon_name_id, ru.parent_taxon_name_id \
+#                                         from       reference_usages ru \
+#                                         inner join cte on ru.parent_taxon_name_id = cte.taxon_name_id \
+#                                         where      ru.deleted_at is null \
+#                                         ) \
+#                                         select taxon_name_id from cte"
+#                     # conn = pymysql.connect(**db_settings)
+#                     with conn.cursor() as cursor:
+#                         cursor.execute(query_taxon_group)
+#                         child_results = cursor.fetchall()
+#                         all_child_results += child_results
+
+#                 all_results = results + all_child_results
+
+#                 if all_results:
+#                     base_query = f"{base_query} WHERE tn.id IN {str(tuple((item[0] for item in all_results)))}"
+#                     count_query = f"{count_query} WHERE tn.id IN {str(tuple((item[0] for item in all_results)))}"
+#                     for c in conditions:
+#                         base_query += " AND " + c
+#                         count_query += " AND " + c
+#                 else:
+#                     # 沒有結果的狀態
+#                     response = {"status": {"code": 200, "message": "Success"},
+#                                 "info": {"total": 0, "limit": limit, "offset": offset}, "data": []}
+#                     return HttpResponse(json.dumps(response, ensure_ascii=False, cls=DateTimeEncoder), content_type="application/json,charset=utf-8")
+#                 # print('taxon_group: ', query)
+#             else:
+#                 for l in range(len(conditions)):
+#                     if l == 0:
+#                         base_query = f"{base_query} WHERE {conditions[l]}"
+#                         count_query = f"{count_query} WHERE {conditions[l]}"
+#                     else:
+#                         base_query += f' AND {conditions[l]}'
+#                         count_query += f" AND {conditions[l]}"
+#                 # print('else: ', query)
+
+#             with conn.cursor() as cursor:
+#                 query = f'WITH base_query AS ({base_query} ORDER BY tn.id LIMIT {limit} OFFSET {offset} ) {query}'  # 只處理限制筆數
+#                 cursor.execute(query)
+#                 df = cursor.fetchall()
+#                 df = [list(item) for item in df]
+#                 df = pd.DataFrame(df, columns=['name_id', 'rank', 'simple_name', 'name_author', 'original_name_id', 'note',
+#                                                'created_at', 'updated_at', 'nomenclature_name', 'is_hybrid', 'protologue',
+#                                                'type_name_id', 'latin_genus', 'latin_s1', 'species_layers', 'formatted_name', 'namecode', 'is_deleted'])
+#                 cursor.execute(count_query)
+#                 len_total = cursor.fetchall()[0][0]
+
+#                 # only rank >= 34 has 物種學名分欄 & original_name_id
+#                 if len(df):
+#                     df.loc[df['rank'] < 34, 'name'] = '{}'
+#                     df.loc[df['rank'] < 34, 'original_name_id'] = None
+#                     df['rank'] = df['rank'].apply(lambda x: rank_map[x])
+
+#                 # find hybrid_parent
+#                 df['hybrid_parent'] = None
+
+#                 for h in df[['is_hybrid', 'name_id']].index:
+#                     if df.loc[h]['is_hybrid'] == 'true':
+#                         # 這邊的namecode concat應該不會超過上限 維持原本寫法
+#                         query_hybrid_parent = f"SELECT GROUP_CONCAT( CONCAT(tn.name, ' ',tn.formatted_authors) SEPARATOR ' × ' ) FROM taxon_name_hybrid_parent AS tnhp \
+#                                                 JOIN taxon_names AS tn ON tn.id = tnhp.parent_taxon_name_id \
+#                                                 WHERE tnhp.taxon_name_id = {df.loc[h]['name_id']} AND tn.is_publish = 1 \
+#                                                 GROUP BY tnhp.taxon_name_id"
+#                         with conn.cursor() as cursor:
+#                             cursor.execute(query_hybrid_parent)
+#                             hybrid_name_result = cursor.fetchall()
+#                         if hybrid_name_result:
+#                             df.loc[df.name_id == df.loc[h]['name_id'], 'hybrid_parent'] = hybrid_name_result[0]
+
+#                 # organize results
+#                 df = df.replace({np.nan: None})
+
+#                 if len(df):
+
+#                     # 加上taxon
+
+#                     query = { "query": "*:*",
+#                         "offset": 0,
+#                         "limit": 1000000,
+#                         "filter": ['taxon_name_id:({})'.format(' OR '.join([str(n) for n in df.name_id.to_list()])), 'is_deleted:false', ],
+#                         "fields": ['taxon_id', 'status', 'is_in_taiwan','taxon_name_id']
+#                         }
+                    
+#                     query_req = json.dumps(query)
+
+#                     resp = requests.post(f'{SOLR_PREFIX}taxa/select?', data=query_req, headers={'content-type': "application/json" })
+#                     resp = resp.json()
+
+#                     # print(resp)
+#                     taxon_df = pd.DataFrame(resp['response']['docs'])
+#                     if len(taxon_df):
+#                         taxon_df['taxon_name_id'] = taxon_df['taxon_name_id'].astype(int)
+#                         taxon_df = taxon_df.rename(columns={'taxon_name_id': 'name_id'})
+#                         taxon_df = taxon_df.groupby('name_id').apply(lambda x: x[['taxon_id', 'status', 'is_in_taiwan']].to_dict('records')).reset_index(name='taxon')
+
+#                         for i in taxon_df.index:
+#                             row = taxon_df.iloc[i]
+#                             # taxon_tmp = json.loads(row.taxon)
+#                             taxon_tmp = pd.DataFrame(row.taxon)
+#                             # 排序規則： 
+#                             # Taiwan+有效 accepted
+#                             # Taiwan+無效 not-accepted
+#                             # Taiwan+誤用 misapplied
+#                             custom_dict = {'accepted': 0, 'not-accepted': 1, 'misapplied': 2}
+#                             taxon_tmp = taxon_tmp.sort_values(by=['status'], key=lambda x: x.map(custom_dict)).sort_values(by='is_in_taiwan',ascending=False)
+#                             taxon_tmp['is_in_taiwan'] = taxon_tmp['is_in_taiwan'].replace({0: False, 1: True, '0': False, '1': True, '2': False, None: False})
+#                             taxon_tmp = taxon_tmp.rename(columns={'status': 'taicol_name_status'})
+#                             taxon_tmp = taxon_tmp[['taxon_id','taicol_name_status','is_in_taiwan']]
+#                             taxon_df.loc[i,'taxon'] = taxon_tmp.to_json(orient='records') 
+
+#                     if len(taxon_df):
+#                         df = df.merge(taxon_df, how='left')    
+#                     else:
+#                         df['taxon'] = '[]'
+                    
+
+#                     df['taxon'] = df['taxon'].replace({np.nan:'[]'})
+#                     df['taxon'] = df['taxon'].apply(json.loads)
+
+#                     # 日期格式 yy-mm-dd
+#                     # df['created_at'] = df.created_at.dt.strftime('%Y-%m-%d')
+#                     # df['updated_at'] = df.updated_at.dt.strftime('%Y-%m-%d')
+#                     df['created_at'] = df.created_at.apply(lambda x: str(x).split(' ')[0])
+#                     df['updated_at'] = df.updated_at.apply(lambda x: str(x).split(' ')[0])
+
+#                     # 是否已刪除
+#                     df['is_deleted'] = df.is_deleted.apply(lambda x: True if x else False)
+
+#                     # remove null/empty/None element in 'name' json
+#                     for n in df.index:
+#                         name = {'latin_genus': df.latin_genus[n], 'latin_s1': df.latin_s1[n]}
+#                         count = 2
+#                         for s in json.loads(df.species_layers[n]):
+#                             if s.get('rank_abbreviation') and s.get('latin_name'):
+#                                 name.update({f's{count}_rank': s.get('rank_abbreviation'), f'latin_s{count}': s.get('latin_name')})
+#                                 count += 1
+#                         name = {k: v for k, v in name.items() if v and v != 'null'}
+#                         df.loc[n, 'name'] = [name]
+#                         if df.original_name_id[n]:
+#                             df.loc[n, 'original_name_id'] = int(df.original_name_id[n])
+#                         if df.type_name_id[n]:
+#                             df.loc[n, 'type_name_id'] = int(df.type_name_id[n])
+#                         else:
+#                             df.loc[n, 'type_name_id'] = None
+
+#                     # subset & rename columns
+#                     df = df[['name_id', 'nomenclature_name', 'rank', 'simple_name', 'name_author', 'formatted_name', 'name', 'original_name_id',
+#                             'is_hybrid', 'hybrid_parent', 'protologue', 'type_name_id', 'namecode', 'taxon', 'is_deleted', 'created_at', 'updated_at']]
+
+#                     df['is_hybrid'] = df['is_hybrid'].replace('false', False).replace('true', True)
+#                     df.loc[df['name_author'] == "", 'name_author'] = None
+#                     df = df.replace({np.nan: None, '': None})
+#                     df[['name_id','original_name_id','type_name_id']] = df[['name_id','original_name_id','type_name_id']].replace({None: 0, np.nan: 0})
+#                     df[['name_id','original_name_id','type_name_id']] = df[['name_id','original_name_id','type_name_id']].replace({np.nan: 0}).astype('int64').replace({0: None})
+#                 response = {"status": {"code": 200, "message": "Success"},
+#                             "info": {"total": len_total, "limit": limit, "offset": offset}, "data": df.to_dict('records')}
+#         except Exception as er:
+#             print(er)
+#             response = {"status": {"code": 500, "message": "Unexpected Error"}}
+
+
+#         return HttpResponse(json.dumps(response, ensure_ascii=False, cls=DateTimeEncoder), content_type="application/json,charset=utf-8")
+#         # https://www.django-rest-framework.org/api-guide/exceptions/
 
 
 def update_check_usage(request):
