@@ -1257,12 +1257,15 @@ def get_per_usages(taxon_name_id, rows, prop_df_, name_df, ref_df, conn, backbon
             chosen_ru_list = select_global_latest_ru(temp, ref_df, conn)
             removing_ru_id = [rr for rr in temp.ru_id.to_list() if rr not in chosen_ru_list]
             per_usages = per_usages[~per_usages.including_usage_id.isin(removing_ru_id)]
-        per_usages = per_usages.replace({np.nan: None})
-        query = "SELECT id, publish_year FROM `references` WHERE id IN %s"
-        with conn.cursor() as cursor:
-            execute_line = cursor.execute(query, (per_usages.reference_id.unique().tolist(),))
-            ref_year = pd.DataFrame(cursor.fetchall(), columns=['reference_id', 'publish_year'])
-            per_usages = per_usages.merge(ref_year)
-            per_usages = per_usages.sort_values('publish_year', ascending=True)
-        per_usages = per_usages.drop(columns=['including_usage_id']).to_dict('records')
+        if len(per_usages):
+            per_usages = per_usages.replace({np.nan: None})
+            query = "SELECT id, publish_year FROM `references` WHERE id IN %s"
+            with conn.cursor() as cursor:
+                execute_line = cursor.execute(query, (per_usages.reference_id.unique().tolist(),))
+                ref_year = pd.DataFrame(cursor.fetchall(), columns=['reference_id', 'publish_year'])
+                per_usages = per_usages.merge(ref_year)
+                per_usages = per_usages.sort_values('publish_year', ascending=True)
+            per_usages = per_usages.drop(columns=['including_usage_id']).to_dict('records')
+        else:
+            per_usages = []
     return per_usages
