@@ -1217,34 +1217,52 @@ def get_per_usages(taxon_name_id, rows, prop_df_, name_df, ref_df, conn, backbon
     list
         per_usages 清單，每個項目包含 pro_parte, reference_id, including_usage_id 等欄位
     """
+    # --- 1. 初始化與取得基本資料 ---
     per_usages = []
-    # 4-1 相同taxon_name_id的per_usages
-    for p in prop_df_[prop_df_.taxon_name_id == taxon_name_id].to_dict('records'):
-        if now_usages := json.loads(p.get('per_usages')):
-            per_usages += [{**item, 'including_usage_id': p.get('ru_id')} for item in now_usages]
-    # 4-2 相同taxon_name_id的有效usage (轉成per_usages形式)
-    for usage in rows[(rows.taxon_name_id == taxon_name_id) & 
-                         (rows.ru_status == 'accepted')].to_dict('records'):
-        if usage.get('reference_id') in references: # 必須要是納入的文獻
+    name_reference_id = None
+    name_rows = name_df[name_df.taxon_name_id == taxon_name_id]
+    if not name_rows.empty:
+        name_reference_id = name_rows.name_reference_id.values[0]
+    # 定義過濾邏輯：如果是 misapplied，則記錄需要排除的 ID
+    is_misapplied = (taxon_status == 'misapplied')
+    exclude_ref_id = name_reference_id if is_misapplied else None
+    # --- 2. 處理 4-1: 相同 taxon_name_id 的 per_usages ---
+    target_props = prop_df_[prop_df_.taxon_name_id == taxon_name_id]
+    for p in target_props.to_dict('records'):
+        if raw_json := p.get('per_usages'):
+            now_usages = json.loads(raw_json)
+            for item in now_usages:
+                # 關鍵過濾：若為 misapplied 且 ID 相符則跳過
+                if exclude_ref_id and item.get('reference_id') == exclude_ref_id:
+                    continue
+                
+                per_usages.append({
+                    **item, 
+                    'including_usage_id': p.get('ru_id')
+                })
+    # --- 3. 處理 4-2: 相同 taxon_name_id 的有效 usage ---
+    accepted_usages = rows[(rows.taxon_name_id == taxon_name_id) & (rows.ru_status == 'accepted')]
+    for usage in accepted_usages.to_dict('records'):
+        ref_id = usage.get('reference_id')
+        # 過濾條件：必須在文獻清單內，且不可為 misapplied 下的發表文獻
+        if ref_id in references and ref_id != exclude_ref_id:
             per_usages.append({
                 "pro_parte": False,
-                "reference_id": usage.get('reference_id'),
+                "reference_id": ref_id,
                 "including_usage_id": usage.get('ru_id')
             })
-    if not taxon_status == 'misapplied': # 誤用不該包含本身發表文獻
-        # 4-3 taxon_name_id本身的發表文獻
-        name_rows = name_df[name_df.taxon_name_id == taxon_name_id]
-        if not name_rows.empty:
-            name_reference_id = name_rows.name_reference_id.values[0]
-            if name_reference_id and name_reference_id not in [pp['reference_id'] for pp in per_usages]:
-                per_usages.append({
-                    "pro_parte": False,
-                    "reference_id": name_reference_id,
-                    "is_from_published_ref": True,
-                    "including_usage_id": None
-                })
+    # --- 4. 處理 4-3: 補回發表文獻 (僅限非 misapplied) ---
+    if not is_misapplied and name_reference_id:
+        # 檢查是否已存在，避免重複
+        existing_refs = {pp['reference_id'] for pp in per_usages}
+        if name_reference_id not in existing_refs:
+            per_usages.append({
+                "pro_parte": False,
+                "reference_id": name_reference_id,
+                "is_from_published_ref": True,
+                "including_usage_id": None
+            })
     if len(per_usages):
-        # print(per_usages)
         per_usages = pd.DataFrame(per_usages)
         # # 只取ref_df中有的reference_id
         # per_usages = per_usages[per_usages.reference_id.isin(ref_df.index.to_list())]
