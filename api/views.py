@@ -1241,7 +1241,7 @@ class NameView(APIView):
                         try:
                             # 查詢 Solr
                             query_solr = {
-                                "query": "*:*", "offset": 0, "limit": 10000, # 這邊應該不用用limit
+                                "query": "*:*", "offset": 0, "limit": 10000, 
                                 "filter": [f'taxon_name_id:({" OR ".join(df.name_id.astype(str))})', 'is_deleted:false'],
                                 "fields": ['taxon_id', 'status', 'is_in_taiwan', 'taxon_name_id']
                             }
@@ -1249,12 +1249,11 @@ class NameView(APIView):
                             solr_docs = resp.get('response', {}).get('docs', [])
                             if solr_docs:
                                 t_df = pd.DataFrame(solr_docs)
-                                t_df['taxon_name_id'] = t_df['taxon_name_id'].astype(int)
-                                t_df = pd.DataFrame(solr_docs)
                                 # 補上可能缺少的欄位
                                 for col in ['is_in_taiwan']:
                                     if col not in t_df.columns:
                                         t_df[col] = None
+                                t_df['taxon_name_id'] = t_df['taxon_name_id'].astype(int)
                                 # 定義排序與狀態 mapping
                                 def process_solr_group(g):
                                     custom_dict = {'accepted': 0, 'not-accepted': 1, 'misapplied': 2}
