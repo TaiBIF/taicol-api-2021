@@ -1107,7 +1107,7 @@ class NameView(APIView):
                 """
                 cursor.execute(page_ids_query, sql_params)
                 page_ids_rows = cursor.fetchall()
-                
+
                 # 將 tuple result 轉為 list [1, 2, 3]
                 target_ids = [r[0] for r in page_ids_rows]
 
@@ -1116,7 +1116,7 @@ class NameView(APIView):
                 if target_ids:
                     # 將 ID 列表轉為字串給 IN 使用，因為數量最多 300，這樣做是安全的
                     ids_str = ','.join(map(str, target_ids))
-                    
+
                     # 修正：tn.name AS simple_name 以配合 Pandas Column
                     select_fields = """
                         tn.id, tn.rank_id, tn.name AS simple_name, an.name_author,
@@ -1143,7 +1143,7 @@ class NameView(APIView):
                         GROUP BY tn.id 
                         ORDER BY tn.id
                     """
-                    
+
                     cursor.execute(main_query)
                     data_rows = cursor.fetchall()
                 else:
@@ -1180,7 +1180,7 @@ class NameView(APIView):
                     def process_name_column(row):
                         name_dict = {'latin_genus': row.get('latin_genus'), 'latin_s1': row.get('latin_s1')}
                         s_layers = row.get('species_layers')
-                        
+
                         if s_layers:
                             try:
                                 if isinstance(s_layers, str):
@@ -1197,7 +1197,7 @@ class NameView(APIView):
                                 pass
                         
                         final_name = {k: v for k, v in name_dict.items() if v and v != 'null'}
-                        
+
                         # Type Name ID 處理
                         t_id = row.get('type_name_id')
                         try:
@@ -1241,17 +1241,20 @@ class NameView(APIView):
                         try:
                             # 查詢 Solr
                             query_solr = {
-                                "query": "*:*", "offset": 0, "limit": len(df),
+                                "query": "*:*", "offset": 0, "limit": 10000, # 這邊應該不用用limit
                                 "filter": [f'taxon_name_id:({" OR ".join(df.name_id.astype(str))})', 'is_deleted:false'],
                                 "fields": ['taxon_id', 'status', 'is_in_taiwan', 'taxon_name_id']
                             }
                             resp = requests.post(f'{SOLR_PREFIX}taxa/select?', json=query_solr).json()
                             solr_docs = resp.get('response', {}).get('docs', [])
-
                             if solr_docs:
                                 t_df = pd.DataFrame(solr_docs)
                                 t_df['taxon_name_id'] = t_df['taxon_name_id'].astype(int)
-                                
+                                t_df = pd.DataFrame(solr_docs)
+                                # 補上可能缺少的欄位
+                                for col in ['is_in_taiwan']:
+                                    if col not in t_df.columns:
+                                        t_df[col] = None
                                 # 定義排序與狀態 mapping
                                 def process_solr_group(g):
                                     custom_dict = {'accepted': 0, 'not-accepted': 1, 'misapplied': 2}
@@ -1261,7 +1264,6 @@ class NameView(APIView):
                                     g['is_in_taiwan'] = g['is_in_taiwan'].replace({0: False, 1: True, '0': False, '1': True, '2': False, None: False})
                                     result = g[['taxon_id', 'status', 'is_in_taiwan']].rename(columns={'status': 'taicol_name_status'}).to_dict('records')
                                     return result
-
                                 taxon_map = t_df.groupby('taxon_name_id').apply(process_solr_group).to_dict()
                                 # 注意：這裡要將 dict 轉回 json string 還是 list，依前端需求，原程式碼是 List of Dicts
                                 df['taxon'] = df['name_id'].map(taxon_map).fillna(pd.Series([[]] * len(df)))
