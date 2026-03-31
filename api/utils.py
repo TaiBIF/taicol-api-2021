@@ -381,7 +381,7 @@ def get_whitelist():
             accepted_taxon_name_id,
             reference_id
         FROM api_usage_check 
-        WHERE whitelist_type IN (1, 2, 3)
+        WHERE whitelist_type IN (1, 2, 3) and is_whitelist = 1
         """
         cursor.execute(query)
         all_results = cursor.fetchall()
