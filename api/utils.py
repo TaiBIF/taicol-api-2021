@@ -27,9 +27,6 @@ def validate(date_text):
         return False
 
 
-conn = pymysql.connect(**db_settings)
-
-
 status_map = {'accepted': 'Accepted', 'misapplied': 'Misapplied', 'not-accepted': 'Not accepted', 'deleted': 'Deleted', 'undetermined': 'Undetermined'}
 
 
@@ -47,18 +44,25 @@ cites_map = { 'I': '1','II':'2','III':'3','NC':'NC'}
 
 protected_map = {'第一級': 'I', '第二級': 'II', '第三級': 'III', '珍貴稀有植物':'1'}
 
-rank_map, rank_map_c,rank_map_c_reverse, rank_order_map = {}, {}, {}, {}
-conn = pymysql.connect(**db_settings)
-query = "SELECT id, display, `order` from ranks"
-with conn.cursor() as cursor:
-    cursor.execute(query)
-    ranks = cursor.fetchall()
-    rank_map = dict(zip([r[0] for r in ranks], [eval(r[1])['en-us'] for r in ranks]))
-    rank_map_c = dict(zip([r[0] for r in ranks], [eval(r[1])['zh-tw'] for r in ranks]))
-    rank_map_c_reverse = dict(zip([eval(r[1])['zh-tw'] for r in ranks],[r[0] for r in ranks]))
-    rank_order_map = dict(zip([r[0] for r in ranks], [r[2] for r in ranks]))
+rank_map: Dict[int, str] = {}
+rank_map_c: Dict[int, str] = {}
+rank_map_c_reverse: Dict[str, int] = {}
+rank_order_map: Dict[int, int] = {}
 
-conn.close()
+
+def _load_rank_maps():
+    """載入 rank 對照表，由 AppConfig.ready() 呼叫一次。"""
+    conn = pymysql.connect(**db_settings)
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT id, display, `order` from ranks")
+            ranks = cursor.fetchall()
+        rank_map.update(dict(zip([r[0] for r in ranks], [eval(r[1])['en-us'] for r in ranks])))
+        rank_map_c.update(dict(zip([r[0] for r in ranks], [eval(r[1])['zh-tw'] for r in ranks])))
+        rank_map_c_reverse.update(dict(zip([eval(r[1])['zh-tw'] for r in ranks], [r[0] for r in ranks])))
+        rank_order_map.update(dict(zip([r[0] for r in ranks], [r[2] for r in ranks])))
+    finally:
+        conn.close()
 
 # 林奈階層
 
@@ -87,23 +91,40 @@ lin_ranks = [50, 49, 3, 12, 18, 22, 26, 30, 34]
 sub_lin_ranks = [35,36,37,38,39,40,41,42,43,44,45,46]
 
 
-var_dict = requests.get("https://raw.githubusercontent.com/TaiBIF/tbia-portal/main/data/variants.json")
-var_dict = var_dict.json()
+# 異體字 / 會意字資料 — 第一次使用時才從 GitHub 載入，避免啟動時對外部依賴
+_VARIANT_URL = "https://raw.githubusercontent.com/TaiBIF/tbia-portal/main/data/variants.json"
+_COMPOSITE_URL = "https://raw.githubusercontent.com/TaiBIF/tbia-portal/main/data/composites.json"
 
-comp_dict = requests.get("https://raw.githubusercontent.com/TaiBIF/tbia-portal/main/data/composites.json")
-comp_dict = comp_dict.json()
+_variant_data_loaded: bool = False
+_variant_groups: List[List[str]] = []
+_composite_map: Dict[str, str] = {}
+_reverse_composite_map: Dict[str, str] = {}
 
-# 1. 異體字群組
 
-variant_groups: List[List[str]] = var_dict
+def _ensure_variant_data() -> None:
+    """Lazy-load 異體字資料，失敗時靜默降級（搜尋仍可運作，只是不做變體展開）。"""
+    global _variant_data_loaded, _variant_groups, _composite_map, _reverse_composite_map
+    if _variant_data_loaded:
+        return
+    try:
+        var_dict = requests.get(_VARIANT_URL, timeout=10).json()
+        comp_dict = requests.get(_COMPOSITE_URL, timeout=10).json()
+        _variant_groups = var_dict
+        _composite_map = comp_dict
+        _reverse_composite_map = {v: k for k, v in comp_dict.items()}
+    except Exception as e:
+        print(f"Warning: 無法載入異體字資料，變體搜尋功能停用。原因：{e}")
+        _variant_groups = []
+        _composite_map = {}
+        _reverse_composite_map = {}
+    finally:
+        _variant_data_loaded = True
 
-# 2. 會意字 ↔ 合成組合 映射
-composite_map: Dict[str, str] = comp_dict
-reverse_composite_map: Dict[str, str] = {v: k for k, v in composite_map.items()}
 
 # 3. 查詢某個字的異體群組
 def get_word_variants(char: str) -> List[str]:
-    for group in variant_groups:
+    _ensure_variant_data()
+    for group in _variant_groups:
         if char in group:
             return group
     return [char]
@@ -117,12 +138,13 @@ def generate_pattern_from_word(word: str) -> str:
 
 # 5. 主處理函式：將輸入文字轉換為包含異體字與會意字 pattern 的版本
 def process_text_variants(text: str) -> str:
+    _ensure_variant_data()
     result = ''
     i = 0
     while i < len(text):
         matched = False
         # 處理會意字組合：優先處理最長的詞組
-        for composite, composed in composite_map.items():
+        for composite, composed in _composite_map.items():
             if text.startswith(composite, i):
                 pattern = f"({composite}|{generate_pattern_from_word(composed)})"
                 result += pattern

@@ -1,4 +1,5 @@
 
+SECRET_KEY=
 WEB_ENV=dev
 ALLOWED_HOSTS=127.0.0.1,0.0.0.0
 NOMENMATCH_URL=http://match.taibif.tw/v2/api.php
