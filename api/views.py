@@ -19,6 +19,7 @@ from rest_framework.views import APIView
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 
+from api.services._00_update_usage_check import check_taxon_usage
 from api.utils import *
 # from api.utils_for_usage import *
 import requests
