@@ -60,11 +60,17 @@ custom_reference_type_order = {
 
 
 bio_group_map = {
+    "Crustaceans": "蝦蟹類",
     "Insects": "昆蟲",
+    "Moths": "蛾類",
+    "Butterflies": "蝶類",
+    "Dragonflies": "蜻蛉類",
+    "Beetles": "甲蟲類",
+    "Mollusks": "蝸牛與貝類",
     "Spiders": "蜘蛛",
     "Fishes": "魚類",
-    "Reptiles": "爬蟲類",
     "Amphibians": "兩棲類",
+    "Reptiles": "爬蟲類",
     "Birds": "鳥類",
     "Mammals": "哺乳類",
     "Vascular Plants": "維管束植物",
@@ -74,8 +80,7 @@ bio_group_map = {
     "Viruses": "病毒",
     "Bacteria": "細菌",
     "Fungi": "真菌",
-}
-# is_in_taiwan 調整
+}# is_in_taiwan 調整
 
 # reference_usages原始狀態
 # 1=true
@@ -406,7 +411,7 @@ class NameMatchView(APIView):
                 if kingdoms := request.GET.getlist('kingdom'):
                     query_dict['kingdom'] = ",".join([f'"{k}"' for k in kingdoms])
 
-                # bio_group 比對常見類群
+                # bio_group 比對生物類群
 
                 if bio_group := request.GET.get('bio_group'):
                     if bio_group != 'all':
@@ -953,11 +958,10 @@ class TaxonView(APIView):
                 is_list = ['is_hybrid','is_in_taiwan','is_endemic','is_fossil','is_terrestrial','is_freshwater','is_brackish','is_marine','not_official']
                 df[is_list] = df[is_list].replace({0: False, 1: True, '0': False, '1': True, 'true': True, 'false': False})
                 df['is_in_taiwan'] = df['is_in_taiwan'].replace({2: False, '2': False, None: False})
-                # df[is_list] = df[is_list].replace({0: 'false', 1: 'true', '0': 'false', '1': 'true', True: 'true', False: 'false'})
 
                 # cites要改成 I,II,III
                 df['cites'] = df['cites'].apply(lambda x: x.replace('1','I').replace('2','II').replace('3','III') if x else x)
-                df['redlist'] = df['redlist'].apply(lambda x: redlist_map_rev[x] if x else x)
+                # df['redlist'] = df['redlist'].apply(lambda x: redlist_map_rev[x] if x else x)
 
                 df = df.replace({np.nan: None, '': None})
                 df['name_id'] = df['name_id'].replace({np.nan: 0}).astype('int64').replace({0: None})
