@@ -9,42 +9,20 @@ from numpy import nan
 from api.utils import get_whitelist, sub_lin_ranks, rank_order_map
 from api.services.utils.common import get_conn
 from api.services.utils.checklist import *
-# import time
 
 
+def build_total_df_default(usage_df, ref_df):
 
-
-def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references):
-
-    # conn = get_conn()
-
-    # s = time.time()
-    # 取得當前的白名單
-
-    whitelist_list_1, whitelist_list_2, whitelist_list_3 = get_whitelist()
-
-    # 應該先判斷是不是有 accepted_taxon_name_id & taxon_name_id & reference_id 對應的usage需要被刪除
-    check_deleted_usages()
-
-    ref_df, usage_df, common_name_rus = get_dfs(pairs, exclude_cultured, only_in_taiwan) 
-    usage_df = assign_group_and_tmp_taxon_ids(usage_df) # 初步分群
+    # 202605 拿掉白名單機制
+    whitelist_list_1, whitelist_list_2 = [], []
 
     total_df = usage_df
     total_df = total_df.drop_duplicates()
     total_df = total_df.replace({nan:None})
     total_df = total_df.reset_index(drop=True)
 
-    # print('q', time.time()-s)
-
-    # s = time.time()
-
     # 決定誰是接受學名
     total_df, conflict_parent_list = select_latest_ru(total_df, ref_df, return_conflict=True)
-
-    # print('w', time.time()-s)
-
-    # s = time.time()
-
 
     # 分類觀檢查
 
@@ -58,7 +36,6 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references)
 
     loop_count = 0
     while len(check_obj_list):
-        # print(loop_count)
         for ooo in check_obj_list:
             # 改用同模本身的usage判斷
             # 所有的同模式學名之學名使用，應併入文獻優先的學名使用對應的有效學名的分類群。
@@ -107,7 +84,6 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references)
 
     loop_count = 0
     while len(check_name_list):
-        # print(loop_count)
         for ccc in check_name_list:
             # 用學名本身的usage判斷
             temp = total_df[(total_df.taxon_name_id==ccc)&(total_df.ru_status!='misapplied')]
@@ -150,7 +126,6 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references)
 
     loop_count = 0
     while len(check_multiple_accepted):
-        # print(loop_count)
         for s in check_multiple_accepted: # 214
             rows = total_df[total_df.tmp_taxon_id==s]
             # 限定最新接受名是種下階層
@@ -184,8 +159,7 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references)
     loop_count = 0
 
     while len(parent_not_accepted):
-        # print(loop_count)
-        for s in parent_not_accepted: # 179
+        for s in parent_not_accepted:
             rows = total_df[total_df.tmp_taxon_id==s]
             # 限定最新接受名是種下階層
             # 有可能兩個都是種下 用max_layer_count來判斷誰是下階層
@@ -301,16 +275,8 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references)
                 total_df.loc[total_df.ru_id.isin(rows.ru_id.to_list()), 'tmp_taxon_id'] = new_tmp_taxon_id  
                 select_latest_ru(total_df[total_df.tmp_taxon_id.isin([now_tmp_taxon_id,new_tmp_taxon_id])], ref_df, mark_on_original_df=total_df)
 
-
-    # print('e', time.time()-s)
-    # s = time.time()
-
-
     total_df['taxon_status'] = ''
     total_df = determine_taxon_status(total_df) 
-
-    # print('1', time.time()-s)
-    # s = time.time()
 
     # 這邊在串回來的時候 要把accepted_taxon_name_id改回原本的 
 
@@ -340,6 +306,64 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references)
 
     total_df = total_df.drop_duplicates()
     total_df = total_df.reset_index(drop=True)
+
+    return total_df, usage_df
+
+
+def build_total_df_taicol(usage_df, taxon_ids, only_in_taiwan, exclude_cultured):
+
+    # taicol 分類觀：直接沿用 api_taxon_usages 既有的分群結果
+    conn = get_conn()
+    with conn.cursor() as cursor:
+        query = '''
+            SELECT atu.is_latest, atu.status, atu.taxon_id, atu.reference_usage_id
+            FROM api_taxon_usages atu
+            JOIN api_taxon t ON atu.taxon_id = t.taxon_id
+            WHERE atu.is_deleted = 0
+        '''
+        if only_in_taiwan == 'yes':
+            query += ' AND t.is_in_taiwan = 1'
+        if exclude_cultured == 'yes':
+            query += ' AND t.is_cultured = 0'
+        query += ' AND t.taxon_id IN %s'
+        cursor.execute(query, (list(taxon_ids),))
+        taxon_df = pd.DataFrame(
+            cursor.fetchall(),
+            columns=['is_latest', 'taxon_status', 'taxon_id', 'ru_id'],
+        )
+
+    # 以 taxon_id 為分組基礎，給定流水號
+    taxon_df['tmp_taxon_id'] = taxon_df.groupby('taxon_id', sort=False).ngroup() + 1
+
+    # usage_df 已含自己的 tmp_taxon_id（assign_group 產生），移除避免欄位碰撞
+    total_df = taxon_df.merge(usage_df.drop(columns=['tmp_taxon_id']), on='ru_id', how='inner')
+
+    total_df = total_df[[
+        'ru_id', 'ru_status', 'is_in_taiwan', 'parent_taxon_name_id', 'group',
+        'rank_id', 'nomenclature_id', 'object_group', 'autonym_group',
+        'layer_count', 'publish_year', 'group_id', 'tmp_taxon_id', 'is_latest',
+        'taxon_status', 'accepted_taxon_name_id', 'taxon_name_id',
+        'reference_id'
+    ]]
+    total_df = total_df.drop_duplicates().reset_index(drop=True)
+
+    return total_df
+
+
+def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references, classification_view, taxon_ids, completeness, usage_references):
+
+    # 應該先判斷是不是有 accepted_taxon_name_id & taxon_name_id & reference_id 對應的usage需要被刪除
+    check_deleted_usages()
+
+    ref_df, usage_df, common_name_rus = get_dfs(pairs, exclude_cultured, only_in_taiwan) 
+    usage_df = assign_group_and_tmp_taxon_ids(usage_df) # 初步分群
+
+    if classification_view == 'taicol':
+        # taicol 用另一套流程產生 total_df（自行加上 tmp_taxon_id）
+        total_df = build_total_df_taicol(usage_df, taxon_ids, only_in_taiwan, exclude_cultured)
+    else:
+        total_df, usage_df = build_total_df_default(usage_df, ref_df)
+
 
     df_for_prop = total_df[['ru_id','is_latest','taxon_status','tmp_taxon_id', 'taxon_name_id', 'accepted_taxon_name_id', 'reference_id', 'ru_status']]
 
@@ -377,31 +401,20 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references)
             total_df.loc[total_df.ru_id==accepted_ru_id,'parent_taxon_name_id'] = newest_parent
             usage_df.loc[usage_df.ru_id==accepted_ru_id,'parent_taxon_name_id'] = newest_parent
 
-    # print('2', time.time()-s)
-    # s = time.time()
-
     # # 處理屬性
 
     # 以下只處理ru_status = accepted
     prop_df = get_prop_df(total_df.ru_id.to_list()+common_name_rus)
     prop_df = prop_df.merge(ref_df[['publish_date','type','publish_year','subtitle']], right_index=True, left_on="reference_id")
 
-    # print('a', time.time()-s)
-    # s = time.time()
-
     prop_df = select_priority_prop(prop_df)
-
-    # print('b', time.time()-s)
-    # s = time.time()
 
     # merge全部的usage
     prop_df_ = prop_df.merge(df_for_prop)
     prop_df_['ru_order'] = prop_df_.groupby('tmp_taxon_id').cumcount() + 1
     all_prop_df = determine_taxon_prop(prop_df_)
-    # print('c', time.time()-s)
 
     # 處理per_usages
-    # s = time.time()
     conn = get_conn()
     with conn.cursor() as cursor:
         # backbone_ref_ids
@@ -410,17 +423,15 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references)
         backbone_ref_ids = cursor.fetchall()
         backbone_ref_ids = [b[0] for b in backbone_ref_ids]
         # name_df
-        name_query = 'SELECT id, reference_id, `name`, type_specimens FROM taxon_names WHERE id IN %s'
+        name_query = 'SELECT id, reference_id, `name`, type_specimens, original_taxon_name_id FROM taxon_names WHERE id IN %s'
         cursor.execute(name_query, (total_df.taxon_name_id.unique().tolist(),))
-        name_df = pd.DataFrame(cursor.fetchall(), columns=['taxon_name_id', 'name_reference_id', 'name', 'type_specimens'])
+        name_df = pd.DataFrame(cursor.fetchall(), columns=['taxon_name_id', 'name_reference_id', 'name', 'type_specimens', 'original_taxon_name_id'])
         name_df = name_df.replace({np.nan: None})
         # tmp_checklist_id
         query = '''SELECT max(tmp_checklist_id) from tmp_namespace_usages;'''
         execute_line = cursor.execute(query)
         tmp_checklist_id = cursor.fetchone()[0]
         tmp_checklist_id = tmp_checklist_id + 1 if tmp_checklist_id else 1
-
-    # print('3', time.time()-s)
 
     # 新增欄位 / 自訂欄位 要用
     # 不用匯人的: 標註、台灣分布地、新紀錄、原生/外來備註、備註
@@ -454,31 +465,43 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references)
     # tmp_checklist_id
     # updated_at
 
-    # s = time.time()
-
     final_usages = []
+    references_set = set(references)
+
+    def filter_per_usages(pu_list):
+        if usage_references == 'none':
+            return []
+        if usage_references == 'original':
+            return [u for u in pu_list if u.get('is_from_published_ref')]
+        if usage_references == 'originalincluded':
+            return [u for u in pu_list if u.get('is_from_published_ref') or u.get('reference_id') in references_set]
+        return pu_list  # 'all'
 
     for nt in total_df.tmp_taxon_id.unique():
         rows = total_df[total_df['tmp_taxon_id']==nt]
         try:
             i = rows[(rows['is_latest']==True) & (rows['taxon_status'] == 'accepted')].index[0] # 接受的row
             row = total_df.iloc[i] # 接受的row
-            # accepted_taxon_name_id = row.accepted_taxon_name_id
             parent_taxon_name_id = row.parent_taxon_name_id
+
+            # full / concise：取得最新有效學名對應的 original_taxon_name_id（可能為 None）
+            original_taxon_name_id = None
+            if completeness in ('full', 'concise'):
+                acc_nm = name_df[name_df.taxon_name_id == row.taxon_name_id]
+                if not acc_nm.empty and acc_nm.original_taxon_name_id.values[0] is not None:
+                    original_taxon_name_id = int(acc_nm.original_taxon_name_id.values[0])
+
             now_prop = all_prop_df[all_prop_df.tmp_taxon_id==nt][['common_names','additional_fields',
                 'custom_fields', 'is_in_taiwan', 'alien_type',
                 'is_endemic', 'is_fossil', 'is_terrestrial', 'is_freshwater',
                 'is_brackish', 'is_marine']].to_dict('records')[0]
             if rank_order_map[row.rank_id] <= rank_order_map[30]: # 屬以上 顯示未知
                 now_prop['is_in_taiwan'] = 2
-            # 所有屬性 資訊跟著有效名
-            # 其他學名就存成無效 or 誤用
-            # 要先在介面回傳預覽表，OK後才存進去my_namespace_usage
-            # 還是先存入一個暫存的表 確定後再存入my_namespace_usage 匯入 or 選擇不匯入之後 再將這個暫時表的內容刪除
-            # 在這邊整理要存入properties的欄位
-            # 不管是什麼地位 學名都只保留一個
             taxon_names = rows[['taxon_name_id','taxon_status','rank_id', 'nomenclature_id']].drop_duplicates().to_dict('records')
             for rrr in taxon_names:
+                # none 模式：只保留 accepted
+                if completeness == 'none' and rrr.get('taxon_status') != 'accepted':
+                    continue
                 now_dict = {
                     'tmp_taxon_id': nt,
                     'taxon_name_id': rrr.get('taxon_name_id'),
@@ -489,7 +512,7 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references)
                     now_prop['indications'] = []
                     now_dict['properties'] = safe_json_dumps(now_prop)
                     now_dict['parent_taxon_name_id'] = parent_taxon_name_id
-                    now_dict['per_usages'] = safe_json_dumps(get_per_usages(rrr.get('taxon_name_id'), rows, prop_df_, name_df, ref_df, conn, backbone_ref_ids, references, rrr.get('taxon_status')))
+                    now_per_usages = get_per_usages(rrr.get('taxon_name_id'), rows, prop_df_, name_df, ref_df, conn, backbone_ref_ids, references, rrr.get('taxon_status'))
                     now_dict['type_specimens'] = safe_json_dumps(deduplicate_type_specimens(taxon_name_id=rrr.get('taxon_name_id'), prop_df_=prop_df_, name_df=name_df))
                 else:
                     now_new_prop = {}
@@ -503,7 +526,6 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references)
                         now_dict['type_specimens'] = '[]'
                     elif rrr.get('taxon_status') == 'not-accepted':
                         merged_indications = []
-                        # indications = prop_df_[(prop_df_.ru_status == 'not-accepted') & (prop_df_.taxon_name_id== rrr.get('taxon_name_id'))].indications.values
                         for ii in prop_df_[(prop_df_.ru_status == 'not-accepted') & (prop_df_.taxon_name_id== rrr.get('taxon_name_id'))].indications.values:
                             if ii:
                                 merged_indications += ii.split(',')
@@ -513,14 +535,59 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references)
                     now_new_prop['indications'] = now_indications
                     now_dict['properties'] = safe_json_dumps(now_new_prop)
                     now_dict['parent_taxon_name_id'] = None
-                    now_dict['per_usages'] = safe_json_dumps(get_per_usages(rrr.get('taxon_name_id'), rows, prop_df_, name_df, ref_df, conn, backbone_ref_ids, references, rrr.get('taxon_status')))
-                    # now_dict['type_specimens'] = '[]'
+                    now_per_usages = get_per_usages(rrr.get('taxon_name_id'), rows, prop_df_, name_df, ref_df, conn, backbone_ref_ids, references, rrr.get('taxon_status'))
+
+                # concise 模式：accepted 一律保留；其餘依規則2（保護名）或規則1（per_usages 含 references 內的 ref）
+                if completeness == 'concise' and rrr.get('taxon_status') != 'accepted':
+                    keep = (rrr.get('taxon_name_id') == original_taxon_name_id)  # 規則2
+                    if not keep:
+                        ref_ids = {u.get('reference_id') for u in now_per_usages}  # 規則1
+                        keep = bool(ref_ids & references_set)
+                    if not keep:
+                        continue
+
+                # usage_references：決定最終要存哪些 per_usages
+                now_dict['per_usages'] = safe_json_dumps(filter_per_usages(now_per_usages))
                 final_usages.append(now_dict)
+
+            # full / concise：若最新有效學名的 original_taxon_name_id 不在本群 rows 中，補一筆原始名的 not-accepted
+            if completeness in ('full', 'concise') and original_taxon_name_id is not None \
+                    and original_taxon_name_id not in rows.taxon_name_id.values:
+                with conn.cursor() as cursor:
+                    cursor.execute('SELECT reference_id, `name`, rank_id FROM taxon_names WHERE id = %s', (original_taxon_name_id,))
+                    orig_row = cursor.fetchone()
+                if orig_row:
+                    orig_ref_id, orig_name, orig_rank_id = orig_row
+                    orig_per_usages = []
+                    if orig_ref_id:
+                        orig_per_usages.append({
+                            "pro_parte": False,
+                            "reference_id": orig_ref_id,
+                            "is_from_published_ref": True,
+                            "including_usage_id": None
+                        })
+                    final_usages.append({
+                        'tmp_taxon_id': nt,
+                        'taxon_name_id': original_taxon_name_id,
+                        'status': 'not-accepted',
+                        'rank_id': orig_rank_id,
+                        'parent_taxon_name_id': None,
+                        'properties': safe_json_dumps({'indications': []}),
+                        'type_specimens': '[]',
+                        'per_usages': safe_json_dumps(filter_per_usages(orig_per_usages)),
+                    })
+                    # 補進 name_df，讓後續排序（依 name 做 merge）能保留這筆合成列
+                    if original_taxon_name_id not in name_df.taxon_name_id.values:
+                        name_df = pd.concat([name_df, pd.DataFrame([{
+                            'taxon_name_id': original_taxon_name_id,
+                            'name_reference_id': orig_ref_id,
+                            'name': orig_name,
+                            'type_specimens': None,
+                            'original_taxon_name_id': None,
+                        }])], ignore_index=True)
         except Exception as e: 
             print('merging', e)
             pass
-
-    # print('4', time.time()-s)
 
     # 排序
 
@@ -528,11 +595,8 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references)
     # 除了科以外 應該可以直接用字母排
     # 先根據字母排 再根據自己的上階層排 
     # 先排有效名
-    
 
-    # # s = time.time()
     final_usages = pd.DataFrame(final_usages)
-
 
     # 先取出屬 & 屬以下的
     final_usages['rank_order'] = final_usages['rank_id'].map(rank_order_map)
@@ -541,7 +605,6 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references)
     # 直接按照字母排序
     accepted_usages = accepted_usages.sort_values('name')
     accepted_usages = accepted_usages.reset_index(drop=True)
-
 
     # 再把屬以上的加進去
     # 從下往上排
@@ -573,7 +636,6 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references)
 
     final_usage_df['order'] = final_usage_df.index
 
-
     group_keys = final_usage_df['tmp_taxon_id'].drop_duplicates().reset_index(drop=True)
     group_id_map = {k: i+1 for i, k in enumerate(group_keys)}
 
@@ -582,7 +644,5 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references)
     # 存入資料庫
     final_usage_df['tmp_checklist_id'] = tmp_checklist_id
     final_usage_df = final_usage_df[['parent_taxon_name_id','tmp_checklist_id','taxon_name_id','status','group','order','per_usages','type_specimens','properties']]
-
-    # print('5', time.time()-s)
 
     return final_usage_df, tmp_checklist_id

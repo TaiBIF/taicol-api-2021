@@ -1235,7 +1235,6 @@ def get_per_usages(taxon_name_id, rows, prop_df_, name_df, ref_df, conn, backbon
                 # 關鍵過濾：若為 misapplied 且 ID 相符則跳過
                 if exclude_ref_id and item.get('reference_id') == exclude_ref_id:
                     continue
-                
                 per_usages.append({
                     **item, 
                     'including_usage_id': p.get('ru_id')
@@ -1283,6 +1282,12 @@ def get_per_usages(taxon_name_id, rows, prop_df_, name_df, ref_df, conn, backbon
                 ref_year = pd.DataFrame(cursor.fetchall(), columns=['reference_id', 'publish_year'])
                 per_usages = per_usages.merge(ref_year)
                 per_usages = per_usages.sort_values('publish_year', ascending=True)
+
+            # 標上 is_from_published_ref（misapplied 除外）：reference_id 等於 name_reference_id 者
+            if not is_misapplied and name_reference_id:
+                if 'is_from_published_ref' not in per_usages.columns:
+                    per_usages['is_from_published_ref'] = None
+                per_usages.loc[per_usages.reference_id == name_reference_id, 'is_from_published_ref'] = True
             per_usages = per_usages.drop(columns=['including_usage_id']).to_dict('records')
         else:
             per_usages = []

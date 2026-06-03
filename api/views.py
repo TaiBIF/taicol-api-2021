@@ -1694,14 +1694,19 @@ def get_taxon_by_higher(request):
 def generate_checklist(request):
 
     data = json.loads(request.body)
+    
     pairs = list({(item['reference_id'], item['group']) for item in data['usages']})
     exclude_cultured = data['exclude_cultured']
     only_in_taiwan = data['only_in_taiwan']
     references = data['references']
+    classification_view = data['classification_view']
+    completeness = data['completeness']
+    usage_references = data['usage_references']
+    taxon_ids = data.get('taxon_ids', [])
 
     from api.services._04_generate_checklist import process_taxon_checklist
 
-    final_usage_df, tmp_checklist_id = process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references)
+    final_usage_df, tmp_checklist_id = process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references, classification_view, taxon_ids, completeness, usage_references)
     db_string = 'mysql+pymysql://{}:{}@{}:{}/{}'.format(db_settings.get('user'), db_settings.get('password'), db_settings.get('host'), db_settings.get('port'), db_settings.get('db'))
     db = create_engine(db_string)
 
