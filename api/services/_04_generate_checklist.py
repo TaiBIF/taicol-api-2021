@@ -433,6 +433,86 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references,
         tmp_checklist_id = cursor.fetchone()[0]
         tmp_checklist_id = tmp_checklist_id + 1 if tmp_checklist_id else 1
 
+    # (a) prop_df_ 依 taxon_name_id 分群（供 get_per_usages / deduplicate_type_specimens 使用）
+    prop_records_by_name = {
+        k: v.to_dict('records')
+        for k, v in prop_df_.groupby('taxon_name_id', sort=False)
+    }
+
+    # (b) name_df 依 taxon_name_id 建索引
+    name_by_id = {r['taxon_name_id']: r for r in name_df.to_dict('records')}
+
+    # (c) references.publish_year lookup（取代 get_per_usages 內 N 次的 DB query）
+    ref_publish_year_lookup = {}
+    if 'publish_year' in ref_df.columns:
+        py_series = pd.to_numeric(ref_df['publish_year'], errors='coerce')
+        ref_publish_year_lookup = {
+            k: (None if pd.isna(v) else int(v))
+            for k, v in py_series.items()
+        }
+
+    # 補撈：所有可能被丟進 per_usages 的 reference_id
+    extra_ref_ids = set()
+
+    # (1) prop_df_.per_usages JSON 內的 reference_id（4-1 段會用到）
+    for raw in prop_df_.per_usages.dropna().unique():
+        try:
+            for it in json.loads(raw):
+                rid = it.get('reference_id')
+                if rid is not None:
+                    extra_ref_ids.add(rid)
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+    # (2) total_df 內 accepted usage 的 reference_id(4-2 段會用到)
+    for rid in total_df[total_df.ru_status == 'accepted'].reference_id.dropna().unique():
+        extra_ref_ids.add(int(rid))
+
+    # (3) name_df.name_reference_id(4-3 段會用到)
+    for rid in name_df.name_reference_id.dropna().unique():
+        extra_ref_ids.add(int(rid))
+
+    # 過濾掉已在 lookup 內的
+    extra_ref_ids = {r for r in extra_ref_ids if r not in ref_publish_year_lookup}
+
+    if extra_ref_ids:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                'SELECT id, publish_year FROM `references` WHERE id IN %s',
+                (list(extra_ref_ids),)
+            )
+            for rid, py in cursor.fetchall():
+                try:
+                    ref_publish_year_lookup[rid] = int(py) if py is not None else None
+                except (ValueError, TypeError):
+                    ref_publish_year_lookup[rid] = None
+
+    # (d) 預先批次撈「補原始名」可能用到的 taxon_names（取代迴圈內 N 次的 DB query）
+    orig_lookup = {}
+    if completeness in ('full', 'concise'):
+        accepted_name_ids = total_df[
+            (total_df.is_latest == True) & (total_df.taxon_status == 'accepted')
+        ].taxon_name_id.unique()
+        needed_orig_ids = set()
+        for nm_id in accepted_name_ids:
+            nm_row = name_by_id.get(nm_id)
+            if nm_row is not None:
+                orig = nm_row.get('original_taxon_name_id')
+                if orig is not None and not pd.isna(orig):
+                    needed_orig_ids.add(int(orig))
+        if needed_orig_ids:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    'SELECT id, reference_id, `name`, rank_id FROM taxon_names WHERE id IN %s',
+                    (list(needed_orig_ids),)
+                )
+                for orig_id, orig_ref_id, orig_name, orig_rank_id in cursor.fetchall():
+                    orig_lookup[orig_id] = (orig_ref_id, orig_name, orig_rank_id)
+
+    # (e) 預先 group by tmp_taxon_id（供主迴圈使用，避免 O(n²) 過濾）
+    total_grouped = {k: v for k, v in total_df.groupby('tmp_taxon_id', sort=False)}
+    prop_grouped = {k: v for k, v in all_prop_df.groupby('tmp_taxon_id', sort=False)}
+
     # 新增欄位 / 自訂欄位 要用
     # 不用匯人的: 標註、台灣分布地、新紀錄、原生/外來備註、備註
 
@@ -477,11 +557,10 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references,
             return [u for u in pu_list if u.get('is_from_published_ref') or u.get('reference_id') in references_set]
         return pu_list  # 'all'
 
-    for nt in total_df.tmp_taxon_id.unique():
-        rows = total_df[total_df['tmp_taxon_id']==nt]
+    for nt, rows in total_grouped.items():
         try:
-            i = rows[(rows['is_latest']==True) & (rows['taxon_status'] == 'accepted')].index[0] # 接受的row
-            row = total_df.iloc[i] # 接受的row
+            acc_rows = rows[(rows['is_latest']==True) & (rows['taxon_status'] == 'accepted')]
+            row = acc_rows.iloc[0]  # 等同於原本的 total_df.iloc[i]
             parent_taxon_name_id = row.parent_taxon_name_id
 
             # full / concise：取得最新有效學名對應的 original_taxon_name_id（可能為 None）
@@ -491,10 +570,11 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references,
                 if not acc_nm.empty and acc_nm.original_taxon_name_id.values[0] is not None:
                     original_taxon_name_id = int(acc_nm.original_taxon_name_id.values[0])
 
-            now_prop = all_prop_df[all_prop_df.tmp_taxon_id==nt][['common_names','additional_fields',
+            now_prop = prop_grouped[nt][['common_names','additional_fields',
                 'custom_fields', 'is_in_taiwan', 'alien_type',
                 'is_endemic', 'is_fossil', 'is_terrestrial', 'is_freshwater',
                 'is_brackish', 'is_marine']].to_dict('records')[0]
+
             if rank_order_map[row.rank_id] <= rank_order_map[30]: # 屬以上 顯示未知
                 now_prop['is_in_taiwan'] = 2
             taxon_names = rows[['taxon_name_id','taxon_status','rank_id', 'nomenclature_id']].drop_duplicates().to_dict('records')
@@ -512,8 +592,18 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references,
                     now_prop['indications'] = []
                     now_dict['properties'] = safe_json_dumps(now_prop)
                     now_dict['parent_taxon_name_id'] = parent_taxon_name_id
-                    now_per_usages = get_per_usages(rrr.get('taxon_name_id'), rows, prop_df_, name_df, ref_df, conn, backbone_ref_ids, references, rrr.get('taxon_status'))
-                    now_dict['type_specimens'] = safe_json_dumps(deduplicate_type_specimens(taxon_name_id=rrr.get('taxon_name_id'), prop_df_=prop_df_, name_df=name_df))
+                    now_per_usages = get_per_usages(
+                        rrr.get('taxon_name_id'), rows, prop_df_, name_df, ref_df, conn,
+                        backbone_ref_ids, references, rrr.get('taxon_status'),
+                        ref_publish_year_lookup=ref_publish_year_lookup,
+                        prop_records_by_name=prop_records_by_name,
+                        name_by_id=name_by_id)
+                    now_dict['type_specimens'] = safe_json_dumps(deduplicate_type_specimens(
+                        taxon_name_id=rrr.get('taxon_name_id'),
+                        prop_df_=prop_df_,
+                        name_df=name_df,
+                        prop_records_by_name=prop_records_by_name,
+                        name_by_id=name_by_id))
                 else:
                     now_new_prop = {}
                     now_indications = []
@@ -526,16 +616,28 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references,
                         now_dict['type_specimens'] = '[]'
                     elif rrr.get('taxon_status') == 'not-accepted':
                         merged_indications = []
-                        for ii in prop_df_[(prop_df_.ru_status == 'not-accepted') & (prop_df_.taxon_name_id== rrr.get('taxon_name_id'))].indications.values:
-                            if ii:
-                                merged_indications += ii.split(',')
+                        for rec in prop_records_by_name.get(rrr.get('taxon_name_id'), []):
+                            if rec.get('ru_status') == 'not-accepted':
+                                ii = rec.get('indications')
+                                if ii:
+                                    merged_indications += ii.split(',')
                         merged_indications = list(set(merged_indications))
                         now_indications = [m for m in merged_indications if m != 'syn. nov.']
-                        now_dict['type_specimens'] = safe_json_dumps(deduplicate_type_specimens(taxon_name_id=rrr.get('taxon_name_id'), prop_df_=prop_df_, name_df=name_df))
+                        now_dict['type_specimens'] = safe_json_dumps(deduplicate_type_specimens(
+                        taxon_name_id=rrr.get('taxon_name_id'),
+                        prop_df_=prop_df_,
+                        name_df=name_df,
+                        prop_records_by_name=prop_records_by_name,
+                        name_by_id=name_by_id))
                     now_new_prop['indications'] = now_indications
                     now_dict['properties'] = safe_json_dumps(now_new_prop)
                     now_dict['parent_taxon_name_id'] = None
-                    now_per_usages = get_per_usages(rrr.get('taxon_name_id'), rows, prop_df_, name_df, ref_df, conn, backbone_ref_ids, references, rrr.get('taxon_status'))
+                    now_per_usages = get_per_usages(
+                        rrr.get('taxon_name_id'), rows, prop_df_, name_df, ref_df, conn,
+                        backbone_ref_ids, references, rrr.get('taxon_status'),
+                        ref_publish_year_lookup=ref_publish_year_lookup,
+                        prop_records_by_name=prop_records_by_name,
+                        name_by_id=name_by_id)
 
                 # concise 模式：accepted 一律保留；其餘依規則2（保護名）或規則1（per_usages 含 references 內的 ref）
                 if completeness == 'concise' and rrr.get('taxon_status') != 'accepted':
@@ -553,9 +655,7 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references,
             # full / concise：若最新有效學名的 original_taxon_name_id 不在本群 rows 中，補一筆原始名的 not-accepted
             if completeness in ('full', 'concise') and original_taxon_name_id is not None \
                     and original_taxon_name_id not in rows.taxon_name_id.values:
-                with conn.cursor() as cursor:
-                    cursor.execute('SELECT reference_id, `name`, rank_id FROM taxon_names WHERE id = %s', (original_taxon_name_id,))
-                    orig_row = cursor.fetchone()
+                orig_row = orig_lookup.get(original_taxon_name_id)
                 if orig_row:
                     orig_ref_id, orig_name, orig_rank_id = orig_row
                     orig_per_usages = []
@@ -576,18 +676,22 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references,
                         'type_specimens': '[]',
                         'per_usages': safe_json_dumps(filter_per_usages(orig_per_usages)),
                     })
-                    # 補進 name_df，讓後續排序（依 name 做 merge）能保留這筆合成列
+                    # 補進 name_df 和 name_by_id，讓後續排序與查表能保留這筆合成列
                     if original_taxon_name_id not in name_df.taxon_name_id.values:
-                        name_df = pd.concat([name_df, pd.DataFrame([{
+                        new_name_row = {
                             'taxon_name_id': original_taxon_name_id,
                             'name_reference_id': orig_ref_id,
                             'name': orig_name,
                             'type_specimens': None,
                             'original_taxon_name_id': None,
-                        }])], ignore_index=True)
+                        }
+                        name_df = pd.concat([name_df, pd.DataFrame([new_name_row])], ignore_index=True)
+                        name_by_id[original_taxon_name_id] = new_name_row
+
         except Exception as e: 
             print('merging', e)
-            pass
+            raise
+            # pass
 
     # 排序
 
@@ -597,40 +701,106 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references,
     # 先排有效名
 
     final_usages = pd.DataFrame(final_usages)
-
-    # 先取出屬 & 屬以下的
     final_usages['rank_order'] = final_usages['rank_id'].map(rank_order_map)
-    accepted_usages = final_usages[(final_usages.status=='accepted')&(final_usages.rank_order>=rank_order_map[30])][['taxon_name_id','parent_taxon_name_id','rank_id','tmp_taxon_id']].drop_duplicates()
-    accepted_usages = accepted_usages.merge(name_df[['taxon_name_id','name']].drop_duplicates())
-    # 直接按照字母排序
-    accepted_usages = accepted_usages.sort_values('name')
-    accepted_usages = accepted_usages.reset_index(drop=True)
 
-    # 再把屬以上的加進去
-    # 從下往上排
-    family_usages = final_usages[(final_usages.status=='accepted')&(final_usages.rank_order<rank_order_map[30])][['taxon_name_id','parent_taxon_name_id','rank_id','tmp_taxon_id']].drop_duplicates()
-    family_usages = family_usages.merge(name_df[['taxon_name_id','name']].drop_duplicates()).sort_values(['rank_id','name'],ascending=False)
+    # 在排序段之前才建立 name lookup,確保涵蓋主迴圈內補進來的 original_taxon_name_id
+    name_lookup_for_sort = (
+        name_df[['taxon_name_id', 'name']]
+        .drop_duplicates(subset='taxon_name_id', keep='first')
+        .set_index('taxon_name_id')['name']
+        .to_dict()
+    )
 
-    for ff in family_usages.to_dict('records'):
-        new_row = final_usages[(final_usages.tmp_taxon_id==ff.get('tmp_taxon_id'))&(final_usages.status=='accepted')][['taxon_name_id','parent_taxon_name_id','rank_id','tmp_taxon_id']]
-        if len(accepted_usages[accepted_usages.parent_taxon_name_id==ff.get('taxon_name_id')]):
-            min_id = accepted_usages[accepted_usages.parent_taxon_name_id==ff.get('taxon_name_id')].index.min()
-            accepted_usages = pd.concat([accepted_usages.iloc[:min_id], new_row, accepted_usages.iloc[min_id:]]).reset_index(drop=True)
+    sub_cols = ['taxon_name_id', 'parent_taxon_name_id', 'rank_id', 'tmp_taxon_id']
+    genus_rank_order = rank_order_map[30]
+
+    # name 排序 key:None 或 NaN 統一推到最後(等同 pandas na_position='last')
+    def _name_key(r):
+        n = name_lookup_for_sort.get(r['taxon_name_id'])
+        if n is None or (isinstance(n, float) and pd.isna(n)):
+            return (True, '')
+        return (False, n)
+
+    # family 排序 key:rank_id desc, name desc; None/NaN 視為最小值
+    def _family_sort_key(r):
+        rid = r['rank_id'] if r['rank_id'] is not None else -1
+        n = name_lookup_for_sort.get(r['taxon_name_id'])
+        if n is None or (isinstance(n, float) and pd.isna(n)):
+            n = ''
+        return (rid, n)
+
+    # Step 1: 屬以下 accepted，按 name 字母排(用 pandas quicksort 保持與原本行為一致)
+    sub_df = final_usages[
+        (final_usages.status == 'accepted') &
+        (final_usages.rank_order >= genus_rank_order)
+    ][sub_cols].drop_duplicates().copy()
+    sub_df['_sort_name'] = sub_df['taxon_name_id'].map(name_lookup_for_sort)
+    sub_df = sub_df.sort_values('_sort_name', kind='quicksort').drop(columns=['_sort_name'])
+    acc_list = sub_df.to_dict('records')
+
+    # Step 2: family(屬以上 accepted),依(rank_id, name) desc 迭代,從下往上插
+    family_df = final_usages[
+        (final_usages.status == 'accepted') &
+        (final_usages.rank_order < genus_rank_order)
+    ][sub_cols].drop_duplicates()
+    family_records = family_df.to_dict('records')
+    family_df_sorted = family_df.copy()
+    family_df_sorted['_sort_name'] = family_df_sorted['taxon_name_id'].map(name_lookup_for_sort)
+    family_df_sorted = family_df_sorted.sort_values(['rank_id', '_sort_name'], ascending=False, kind='quicksort').drop(columns=['_sort_name'])
+    family_records = family_df_sorted.to_dict('records')
+
+    # 預先 group:每個 tmp_taxon_id 的 accepted rows(給 family 插入時取用)
+    accepted_records_by_tmp = {
+        nt: g[sub_cols].to_dict('records')
+        for nt, g in final_usages[final_usages.status == 'accepted'].groupby('tmp_taxon_id', sort=False)
+    }
+
+    for ff in family_records:
+        target_tnid = ff['taxon_name_id']
+        new_rows = accepted_records_by_tmp.get(ff['tmp_taxon_id'], [])
+        # 找第一個 child 的位置(child 的 parent_taxon_name_id == target_tnid)
+        insert_pos = None
+        for i, r in enumerate(acc_list):
+            if r['parent_taxon_name_id'] == target_tnid:
+                insert_pos = i
+                break
+        if insert_pos is not None:
+            acc_list[insert_pos:insert_pos] = new_rows
         else:
-            # 如果沒有的話就放在最前面 這邊也需要按照字母排
-            accepted_usages = pd.concat([new_row, accepted_usages]).reset_index(drop=True)
+            # 沒 child 放最前面(等同 pd.concat([new_row, accepted_usages]))
+            acc_list[0:0] = new_rows
 
-    # 最後再把每個tmp_taxon_id的usage加進去
-    other_usages = final_usages[final_usages.status!='accepted'][['taxon_name_id','parent_taxon_name_id','rank_id','tmp_taxon_id']]
+    # Step 3: not-accepted 插到同 tmp_taxon_id 的最後位置之後
+    # 整體先按 name 排(用 pandas quicksort 保持與原本行為一致),再依 tmp_taxon_id 分組
+    other_df = final_usages[final_usages.status != 'accepted'][sub_cols].copy()
+    other_df['_sort_name'] = other_df['taxon_name_id'].map(name_lookup_for_sort)
+    other_df = other_df.sort_values('_sort_name', kind='quicksort').drop(columns=['_sort_name'])
+    other_records_by_tmp = {
+        nt: g[sub_cols].to_dict('records')
+        for nt, g in other_df.groupby('tmp_taxon_id', sort=False)
+    }
 
-    if len(other_usages):
-        other_usages = other_usages.merge(name_df[['taxon_name_id','name']].drop_duplicates())
-        other_usages = other_usages.sort_values('name')
-        for oo in other_usages.tmp_taxon_id.unique():
-            max_id = accepted_usages[accepted_usages.tmp_taxon_id==oo].index.max()+1
-            new_rows = other_usages[other_usages.tmp_taxon_id==oo]
-            accepted_usages = pd.concat([accepted_usages.iloc[:max_id], new_rows, accepted_usages.iloc[max_id:]]).reset_index(drop=True)
+    # 記錄每個 tmp_taxon_id 在 acc_list 中最後出現的位置
+    last_pos_by_tmp = {}
+    for i, r in enumerate(acc_list):
+        last_pos_by_tmp[r['tmp_taxon_id']] = i
 
+    # 依目標位置由大到小排序,從後往前插入(避免影響前面的 index)
+    insert_plan = []
+    for nt, new_rows in other_records_by_tmp.items():
+        if not new_rows:
+            continue
+        last_pos = last_pos_by_tmp.get(nt)
+        if last_pos is None:
+            # 該 tmp_taxon_id 沒有 accepted(理論上不會發生,跳過避免崩潰)
+            continue
+        insert_plan.append((last_pos + 1, new_rows))
+    insert_plan.sort(key=lambda x: x[0], reverse=True)
+    for pos, new_rows in insert_plan:
+        acc_list[pos:pos] = new_rows
+
+    # 組回 DataFrame 並 merge 回完整資料
+    accepted_usages = pd.DataFrame(acc_list)
     final_usage_df = accepted_usages.merge(final_usages)
     final_usage_df = final_usage_df.reset_index(drop=True)
 

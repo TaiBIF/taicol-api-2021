@@ -494,7 +494,10 @@ def select_global_latest_ru(df, ref_df, accepted_only=False):
     - 若 return_conflict=True，回傳 tuple: (result_df, conflict_list)
     """
     df = df.copy()
-    df = df.merge(ref_df[['type','publish_date', 'book_title', 'volume', 'issue']], right_index=True, left_on='reference_id')
+    # 如果 df 已具備 ref 相關欄位（由呼叫端事先 merge），則不重複 merge
+    need_cols = ['type', 'publish_date', 'book_title', 'volume', 'issue']
+    if not all(c in df.columns for c in need_cols):
+        df = df.join(ref_df[need_cols], on='reference_id')
     df['publish_date'] = pd.to_datetime(df['publish_date'], errors='coerce')
     if accepted_only:
         df = df[df['ru_status'] == 'accepted']
@@ -1054,7 +1057,9 @@ def get_collector_ids(specimen: Dict[str, Any]) -> List[int]:
 
 def deduplicate_type_specimens(name_df: pd.DataFrame, 
                               prop_df_: pd.DataFrame, 
-                              taxon_name_id: int) -> List[Dict[str, Any]]:
+                              taxon_name_id: int,
+                              prop_records_by_name=None,
+                              name_by_id=None) -> List[Dict[str, Any]]:
     """
     從name和usage資料表整合並去除重複的模式標本記錄
     Args:
@@ -1142,9 +1147,15 @@ def deduplicate_type_specimens(name_df: pd.DataFrame,
         return matches > 0
     # 收集所有type_specimens
     all_specimens = []
-    # 從name_df收集
-    name_records = name_df[name_df.taxon_name_id == taxon_name_id]
-    for _, row in name_records.iterrows():
+
+    # 從 name_df 收集（用 name_by_id 查表）
+    if name_by_id is not None:
+        nm_row = name_by_id.get(taxon_name_id)
+        name_record_iter = [nm_row] if nm_row is not None else []
+    else:
+        name_record_iter = name_df[name_df.taxon_name_id == taxon_name_id].to_dict('records')
+
+    for row in name_record_iter:
         type_spec_json = row.get('type_specimens')
         if type_spec_json:
             try:
@@ -1155,9 +1166,14 @@ def deduplicate_type_specimens(name_df: pd.DataFrame,
                             all_specimens.append({**specimen, "source": "name"})
             except (json.JSONDecodeError, TypeError):
                 continue
-    # 從prop_df_收集
-    prop_records = prop_df_[prop_df_.taxon_name_id == taxon_name_id]
-    for _, row in prop_records.iterrows():
+
+    # 從 prop_df_ 收集（用 prop_records_by_name 查表）
+    if prop_records_by_name is not None:
+        prop_record_iter = prop_records_by_name.get(taxon_name_id, [])
+    else:
+        prop_record_iter = prop_df_[prop_df_.taxon_name_id == taxon_name_id].to_dict('records')
+
+    for row in prop_record_iter:
         type_spec_json = row.get('type_specimens')
         if type_spec_json:
             try:
@@ -1199,60 +1215,60 @@ def deduplicate_type_specimens(name_df: pd.DataFrame,
     return result
 
 
-def get_per_usages(taxon_name_id, rows, prop_df_, name_df, ref_df, conn, backbone_ref_ids, references, taxon_status):
+def get_per_usages(taxon_name_id, rows, prop_df_, name_df, ref_df, conn,
+                   backbone_ref_ids, references, taxon_status,
+                   ref_publish_year_lookup=None, prop_records_by_name=None,
+                   name_by_id=None):
     """
-    取得特定 taxon_name_id 的 per_usages 資料
-    Parameters:
-    -----------
-    taxon_name_id : int/str
-        分類名稱ID
-    rows : pandas.DataFrame
-        包含 per_usages 欄位的資料框
-    total_df : pandas.DataFrame
-        總資料框，包含 taxon_name_id, ru_status, reference_id, ru_id 等欄位
-    name_df : pandas.DataFrame
-        名稱資料框，包含 taxon_name_id, name_reference_id 等欄位
-    Returns:
-    --------
-    list
-        per_usages 清單，每個項目包含 pro_parte, reference_id, including_usage_id 等欄位
+    取得特定 taxon_name_id 的 per_usages 資料。
+    傳入 ref_publish_year_lookup / prop_records_by_name / name_by_id 可避免 N 次 DB query 與線性掃描。
     """
     # --- 1. 初始化與取得基本資料 ---
     per_usages = []
     name_reference_id = None
-    name_rows = name_df[name_df.taxon_name_id == taxon_name_id]
-    if not name_rows.empty:
-        name_reference_id = name_rows.name_reference_id.values[0]
-    # 定義過濾邏輯：如果是 misapplied，則記錄需要排除的 ID
+
+    if name_by_id is not None:
+        nm_row = name_by_id.get(taxon_name_id)
+        if nm_row is not None:
+            name_reference_id = nm_row.get('name_reference_id')
+    else:
+        name_rows = name_df[name_df.taxon_name_id == taxon_name_id]
+        if not name_rows.empty:
+            name_reference_id = name_rows.name_reference_id.values[0]
+
     is_misapplied = (taxon_status == 'misapplied')
     exclude_ref_id = name_reference_id if is_misapplied else None
+
     # --- 2. 處理 4-1: 相同 taxon_name_id 的 per_usages ---
-    target_props = prop_df_[prop_df_.taxon_name_id == taxon_name_id]
-    for p in target_props.to_dict('records'):
+    if prop_records_by_name is not None:
+        target_props = prop_records_by_name.get(taxon_name_id, [])
+    else:
+        target_props = prop_df_[prop_df_.taxon_name_id == taxon_name_id].to_dict('records')
+
+    for p in target_props:
         if raw_json := p.get('per_usages'):
             now_usages = json.loads(raw_json)
             for item in now_usages:
-                # 關鍵過濾：若為 misapplied 且 ID 相符則跳過
                 if exclude_ref_id and item.get('reference_id') == exclude_ref_id:
                     continue
                 per_usages.append({
-                    **item, 
+                    **item,
                     'including_usage_id': p.get('ru_id')
                 })
+
     # --- 3. 處理 4-2: 相同 taxon_name_id 的有效 usage ---
     accepted_usages = rows[(rows.taxon_name_id == taxon_name_id) & (rows.ru_status == 'accepted')]
     for usage in accepted_usages.to_dict('records'):
         ref_id = usage.get('reference_id')
-        # 過濾條件：必須在文獻清單內，且不可為 misapplied 下的發表文獻
         if ref_id in references and ref_id != exclude_ref_id:
             per_usages.append({
                 "pro_parte": False,
                 "reference_id": ref_id,
                 "including_usage_id": usage.get('ru_id')
             })
+
     # --- 4. 處理 4-3: 補回發表文獻 (僅限非 misapplied) ---
     if not is_misapplied and name_reference_id:
-        # 檢查是否已存在，避免重複
         existing_refs = {pp['reference_id'] for pp in per_usages}
         if name_reference_id not in existing_refs:
             per_usages.append({
@@ -1261,34 +1277,44 @@ def get_per_usages(taxon_name_id, rows, prop_df_, name_df, ref_df, conn, backbon
                 "is_from_published_ref": True,
                 "including_usage_id": None
             })
+
     if len(per_usages):
         per_usages = pd.DataFrame(per_usages)
-        # # 只取ref_df中有的reference_id
-        # per_usages = per_usages[per_usages.reference_id.isin(ref_df.index.to_list())]
-        # 排除backbone
+        # 排除 backbone
         per_usages = per_usages[~per_usages.reference_id.isin(backbone_ref_ids)]
-        # 如果有reference_id重複時 要依including_usage_reference_id優先序選擇優先的那個
+        # 如果有 reference_id 重複時，依優先序選擇
         duplicated_refs = per_usages[per_usages.reference_id.duplicated()].reference_id.unique()
         for ref in duplicated_refs:
-            temp = rows[rows.ru_id.isin(per_usages[per_usages.reference_id==ref].including_usage_id.to_list())]
+            temp = rows[rows.ru_id.isin(per_usages[per_usages.reference_id == ref].including_usage_id.to_list())]
             chosen_ru_list = select_global_latest_ru(temp, ref_df, conn)
             removing_ru_id = [rr for rr in temp.ru_id.to_list() if rr not in chosen_ru_list]
             per_usages = per_usages[~per_usages.including_usage_id.isin(removing_ru_id)]
+
         if len(per_usages):
             per_usages = per_usages.replace({np.nan: None})
-            query = "SELECT id, publish_year FROM `references` WHERE id IN %s"
-            with conn.cursor() as cursor:
-                execute_line = cursor.execute(query, (per_usages.reference_id.unique().tolist(),))
-                ref_year = pd.DataFrame(cursor.fetchall(), columns=['reference_id', 'publish_year'])
-                per_usages = per_usages.merge(ref_year)
-                per_usages = per_usages.sort_values('publish_year', ascending=True)
 
-            # 標上 is_from_published_ref（misapplied 除外）：reference_id 等於 name_reference_id 者
+            # === 取代原本的 DB query：改用 lookup ===
+            if ref_publish_year_lookup is not None:
+                per_usages['publish_year'] = per_usages['reference_id'].map(ref_publish_year_lookup)
+                per_usages['publish_year'] = pd.to_numeric(per_usages['publish_year'], errors='coerce')
+                per_usages = per_usages.dropna(subset=['publish_year'])
+            else:
+                # fallback：保留原本 DB query 行為
+                query = "SELECT id, publish_year FROM `references` WHERE id IN %s"
+                with conn.cursor() as cursor:
+                    cursor.execute(query, (per_usages.reference_id.unique().tolist(),))
+                    ref_year = pd.DataFrame(cursor.fetchall(), columns=['reference_id', 'publish_year'])
+                    per_usages = per_usages.merge(ref_year)
+
+            per_usages = per_usages.sort_values('publish_year', ascending=True)
+
             if not is_misapplied and name_reference_id:
                 if 'is_from_published_ref' not in per_usages.columns:
                     per_usages['is_from_published_ref'] = None
                 per_usages.loc[per_usages.reference_id == name_reference_id, 'is_from_published_ref'] = True
-            per_usages = per_usages.drop(columns=['including_usage_id']).to_dict('records')
+            per_usages = per_usages.drop(columns=['including_usage_id', 'publish_year']).to_dict('records')
+
         else:
             per_usages = []
+
     return per_usages
