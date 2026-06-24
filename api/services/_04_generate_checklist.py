@@ -433,11 +433,11 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references,
         tmp_checklist_id = cursor.fetchone()[0]
         tmp_checklist_id = tmp_checklist_id + 1 if tmp_checklist_id else 1
 
-    # (a) prop_df_ 依 taxon_name_id 分群（供 get_per_usages / deduplicate_type_specimens 使用）
-    prop_records_by_name = {
-        k: v.to_dict('records')
-        for k, v in prop_df_.groupby('taxon_name_id', sort=False)
-    }
+    # (a) prop_df_ 依 taxon_name_id 分群(全部一次 to_dict 再分組,避免逐 group 呼叫)
+    prop_records_by_name = {}
+    for record in prop_df_.to_dict('records'):
+        tnid = record['taxon_name_id']
+        prop_records_by_name.setdefault(tnid, []).append(record)
 
     # (b) name_df 依 taxon_name_id 建索引
     name_by_id = {r['taxon_name_id']: r for r in name_df.to_dict('records')}
@@ -750,10 +750,10 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references,
     family_records = family_df_sorted.to_dict('records')
 
     # 預先 group:每個 tmp_taxon_id 的 accepted rows(給 family 插入時取用)
-    accepted_records_by_tmp = {
-        nt: g[sub_cols].to_dict('records')
-        for nt, g in final_usages[final_usages.status == 'accepted'].groupby('tmp_taxon_id', sort=False)
-    }
+    accepted_records_by_tmp = {}
+    for record in final_usages[final_usages.status == 'accepted'][sub_cols].to_dict('records'):
+        accepted_records_by_tmp.setdefault(record['tmp_taxon_id'], []).append(record)
+
 
     for ff in family_records:
         target_tnid = ff['taxon_name_id']
@@ -775,10 +775,9 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references,
     other_df = final_usages[final_usages.status != 'accepted'][sub_cols].copy()
     other_df['_sort_name'] = other_df['taxon_name_id'].map(name_lookup_for_sort)
     other_df = other_df.sort_values('_sort_name', kind='quicksort').drop(columns=['_sort_name'])
-    other_records_by_tmp = {
-        nt: g[sub_cols].to_dict('records')
-        for nt, g in other_df.groupby('tmp_taxon_id', sort=False)
-    }
+    other_records_by_tmp = {}
+    for record in other_df[sub_cols].to_dict('records'):
+        other_records_by_tmp.setdefault(record['tmp_taxon_id'], []).append(record)
 
     # 記錄每個 tmp_taxon_id 在 acc_list 中最後出現的位置
     last_pos_by_tmp = {}
