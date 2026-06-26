@@ -207,7 +207,6 @@ def replace_char(string):
     return string
 
 
-
 class UnionFind:
     def __init__(self, n):
         self.parent = np.arange(n)
@@ -942,8 +941,8 @@ def get_prop_df(usage_list):
         ])
         # 對 reference_id = 95 的記錄，將特定欄位設為 None
         df.loc[df.reference_id==95, ['is_in_taiwan', 'is_endemic', 'is_fossil', 'is_terrestrial', 
-            'is_freshwater', 'is_brackish', 'is_marine', 'alien_type', 
-            ]] = [None, None, None, None, None, None, None, None]
+            'is_freshwater', 'is_brackish', 'is_marine', 'alien_type', 'per_usages', 'type_specimens'
+            ]] = [None, None, None, None, None, None, None, None, None, None]
     # 定義屬性欄位
     attributes = [k for k in df.keys() if k not in ['ru_id', 'taxon_name_id', 'reference_id', 'accepted_taxon_name_id', 'group']]
     # 排除所有屬性都是空的 row

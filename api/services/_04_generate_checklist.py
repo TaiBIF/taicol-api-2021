@@ -411,7 +411,27 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references,
 
     # merge全部的usage
     prop_df_ = prop_df.merge(df_for_prop)
+
+    # common_name_rus（ref_95）在 inner merge 被丟掉，補回去以彙整 common_names
+    if common_name_rus:
+        name_to_tmp_taxon_id = (
+            usage_df.drop_duplicates('taxon_name_id')
+            .set_index('taxon_name_id')['tmp_taxon_id']
+            .to_dict()
+        )
+        cn_rows = prop_df[prop_df.ru_id.isin(common_name_rus)].copy()
+        cn_rows['tmp_taxon_id'] = cn_rows['taxon_name_id'].map(name_to_tmp_taxon_id)
+        cn_rows = cn_rows[cn_rows['tmp_taxon_id'].notna()]
+        if len(cn_rows):
+            for col in prop_df_.columns:
+                if col not in cn_rows.columns:
+                    cn_rows[col] = None
+            cn_rows = cn_rows[prop_df_.columns]
+            prop_df_ = pd.concat([prop_df_, cn_rows], ignore_index=True)
+
     prop_df_['ru_order'] = prop_df_.groupby('tmp_taxon_id').cumcount() + 1
+
+
     all_prop_df = determine_taxon_prop(prop_df_)
 
     # 處理per_usages
@@ -624,11 +644,11 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references,
                         merged_indications = list(set(merged_indications))
                         now_indications = [m for m in merged_indications if m != 'syn. nov.']
                         now_dict['type_specimens'] = safe_json_dumps(deduplicate_type_specimens(
-                        taxon_name_id=rrr.get('taxon_name_id'),
-                        prop_df_=prop_df_,
-                        name_df=name_df,
-                        prop_records_by_name=prop_records_by_name,
-                        name_by_id=name_by_id))
+                            taxon_name_id=rrr.get('taxon_name_id'),
+                            prop_df_=prop_df_,
+                            name_df=name_df,
+                            prop_records_by_name=prop_records_by_name,
+                            name_by_id=name_by_id))
                     now_new_prop['indications'] = now_indications
                     now_dict['properties'] = safe_json_dumps(now_new_prop)
                     now_dict['parent_taxon_name_id'] = None
@@ -688,10 +708,9 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references,
                         name_df = pd.concat([name_df, pd.DataFrame([new_name_row])], ignore_index=True)
                         name_by_id[original_taxon_name_id] = new_name_row
 
-        except Exception as e: 
+        except Exception as e:
             print('merging', e)
             raise
-            # pass
 
     # 排序
 
@@ -703,111 +722,82 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references,
     final_usages = pd.DataFrame(final_usages)
     final_usages['rank_order'] = final_usages['rank_id'].map(rank_order_map)
 
-    # 在排序段之前才建立 name lookup,確保涵蓋主迴圈內補進來的 original_taxon_name_id
-    name_lookup_for_sort = (
-        name_df[['taxon_name_id', 'name']]
-        .drop_duplicates(subset='taxon_name_id', keep='first')
-        .set_index('taxon_name_id')['name']
-        .to_dict()
+    # === 用 DFS 走樹狀結構排序 ===
+
+    # 1. 取出所有 accepted 節點（每個 tmp_taxon_id 一筆）
+    accepted_nodes = final_usages[final_usages.status == 'accepted'][
+        ['taxon_name_id', 'parent_taxon_name_id', 'rank_id', 'tmp_taxon_id']
+    ].drop_duplicates()
+    accepted_nodes = accepted_nodes.merge(
+        name_df[['taxon_name_id', 'name']].drop_duplicates(), how='left'
     )
 
-    sub_cols = ['taxon_name_id', 'parent_taxon_name_id', 'rank_id', 'tmp_taxon_id']
-    genus_rank_order = rank_order_map[30]
+    # 2. 正規化 NaN parent → None
+    accepted_records = accepted_nodes.to_dict('records')
+    for r in accepted_records:
+        if pd.isna(r['parent_taxon_name_id']):
+            r['parent_taxon_name_id'] = None
 
-    # name 排序 key:None 或 NaN 統一推到最後(等同 pandas na_position='last')
-    def _name_key(r):
-        n = name_lookup_for_sort.get(r['taxon_name_id'])
-        if n is None or (isinstance(n, float) and pd.isna(n)):
-            return (True, '')
-        return (False, n)
+    # 3. 建立 parent -> children 對應
+    #    parent 不在這次 accepted 名單裡的（例如資料只取局部）視為根
+    all_name_ids = {r['taxon_name_id'] for r in accepted_records}
+    children_map = {}
+    for r in accepted_records:
+        parent = r['parent_taxon_name_id']
+        if parent is not None and parent not in all_name_ids:
+            parent = None
+        children_map.setdefault(parent, []).append(r)
 
-    # family 排序 key:rank_id desc, name desc; None/NaN 視為最小值
-    def _family_sort_key(r):
-        rid = r['rank_id'] if r['rank_id'] is not None else -1
-        n = name_lookup_for_sort.get(r['taxon_name_id'])
-        if n is None or (isinstance(n, float) and pd.isna(n)):
-            n = ''
-        return (rid, n)
+    # 4. 同層子節點按 name 字母排序
+    for parent in children_map:
+        children_map[parent].sort(key=lambda x: (x['name'] or ''))
 
-    # Step 1: 屬以下 accepted，按 name 字母排(用 pandas quicksort 保持與原本行為一致)
-    sub_df = final_usages[
-        (final_usages.status == 'accepted') &
-        (final_usages.rank_order >= genus_rank_order)
-    ][sub_cols].drop_duplicates().copy()
-    sub_df['_sort_name'] = sub_df['taxon_name_id'].map(name_lookup_for_sort)
-    sub_df = sub_df.sort_values('_sort_name', kind='quicksort').drop(columns=['_sort_name'])
-    acc_list = sub_df.to_dict('records')
-
-    # Step 2: family(屬以上 accepted),依(rank_id, name) desc 迭代,從下往上插
-    family_df = final_usages[
-        (final_usages.status == 'accepted') &
-        (final_usages.rank_order < genus_rank_order)
-    ][sub_cols].drop_duplicates()
-    family_records = family_df.to_dict('records')
-    family_df_sorted = family_df.copy()
-    family_df_sorted['_sort_name'] = family_df_sorted['taxon_name_id'].map(name_lookup_for_sort)
-    family_df_sorted = family_df_sorted.sort_values(['rank_id', '_sort_name'], ascending=False, kind='quicksort').drop(columns=['_sort_name'])
-    family_records = family_df_sorted.to_dict('records')
-
-    # 預先 group:每個 tmp_taxon_id 的 accepted rows(給 family 插入時取用)
-    accepted_records_by_tmp = {}
-    for record in final_usages[final_usages.status == 'accepted'][sub_cols].to_dict('records'):
-        accepted_records_by_tmp.setdefault(record['tmp_taxon_id'], []).append(record)
-
-
-    for ff in family_records:
-        target_tnid = ff['taxon_name_id']
-        new_rows = accepted_records_by_tmp.get(ff['tmp_taxon_id'], [])
-        # 找第一個 child 的位置(child 的 parent_taxon_name_id == target_tnid)
-        insert_pos = None
-        for i, r in enumerate(acc_list):
-            if r['parent_taxon_name_id'] == target_tnid:
-                insert_pos = i
-                break
-        if insert_pos is not None:
-            acc_list[insert_pos:insert_pos] = new_rows
-        else:
-            # 沒 child 放最前面(等同 pd.concat([new_row, accepted_usages]))
-            acc_list[0:0] = new_rows
-
-    # Step 3: not-accepted 插到同 tmp_taxon_id 的最後位置之後
-    # 整體先按 name 排(用 pandas quicksort 保持與原本行為一致),再依 tmp_taxon_id 分組
-    other_df = final_usages[final_usages.status != 'accepted'][sub_cols].copy()
-    other_df['_sort_name'] = other_df['taxon_name_id'].map(name_lookup_for_sort)
-    other_df = other_df.sort_values('_sort_name', kind='quicksort').drop(columns=['_sort_name'])
-    other_records_by_tmp = {}
-    for record in other_df[sub_cols].to_dict('records'):
-        other_records_by_tmp.setdefault(record['tmp_taxon_id'], []).append(record)
-
-    # 記錄每個 tmp_taxon_id 在 acc_list 中最後出現的位置
-    last_pos_by_tmp = {}
-    for i, r in enumerate(acc_list):
-        last_pos_by_tmp[r['tmp_taxon_id']] = i
-
-    # 依目標位置由大到小排序,從後往前插入(避免影響前面的 index)
-    insert_plan = []
-    for nt, new_rows in other_records_by_tmp.items():
-        if not new_rows:
+    # 5. iterative DFS 從根節點走出 tmp_taxon_id 順序
+    ordered_tmp_taxon_ids = []
+    visited = set()
+    stack = list(reversed(children_map.get(None, [])))
+    while stack:
+        node = stack.pop()
+        tid = node['tmp_taxon_id']
+        if tid in visited:
             continue
-        last_pos = last_pos_by_tmp.get(nt)
-        if last_pos is None:
-            # 該 tmp_taxon_id 沒有 accepted(理論上不會發生,跳過避免崩潰)
+        visited.add(tid)
+        ordered_tmp_taxon_ids.append(tid)
+        for child in reversed(children_map.get(node['taxon_name_id'], [])):
+            stack.append(child)
+
+    # 6. 保險：有 parent 鏈接不上的孤兒節點，補在最後（按 name 排）
+    unvisited = sorted(
+        [r for r in accepted_records if r['tmp_taxon_id'] not in visited],
+        key=lambda x: (x['name'] or '')
+    )
+    for r in unvisited:
+        # if r['tmp_taxon_id'] not in visited:
+        visited.add(r['tmp_taxon_id'])
+        ordered_tmp_taxon_ids.append(r['tmp_taxon_id'])
+
+    # 7. 依順序組合：每個 tmp_taxon_id 先 accepted，再 not-accepted（按 name 排）
+    final_usages_named = final_usages.merge(
+        name_df[['taxon_name_id', 'name']].drop_duplicates(), how='left'
+    )
+    groups_by_tid = {tid: g for tid, g in final_usages_named.groupby('tmp_taxon_id', sort=False)}
+
+    ordered_chunks = []
+    for tid in ordered_tmp_taxon_ids:
+        group = groups_by_tid.get(tid)
+        if group is None:
             continue
-        insert_plan.append((last_pos + 1, new_rows))
-    insert_plan.sort(key=lambda x: x[0], reverse=True)
-    for pos, new_rows in insert_plan:
-        acc_list[pos:pos] = new_rows
+        acc = group[group.status == 'accepted']
+        non_acc = group[group.status != 'accepted'].sort_values('name', na_position='last')
+        ordered_chunks.append(acc)
+        if len(non_acc):
+            ordered_chunks.append(non_acc)
 
-    # 組回 DataFrame 並 merge 回完整資料
-    accepted_usages = pd.DataFrame(acc_list)
-    final_usage_df = accepted_usages.merge(final_usages)
-    final_usage_df = final_usage_df.reset_index(drop=True)
-
+    final_usage_df = pd.concat(ordered_chunks, ignore_index=True)
     final_usage_df['order'] = final_usage_df.index
 
     group_keys = final_usage_df['tmp_taxon_id'].drop_duplicates().reset_index(drop=True)
     group_id_map = {k: i+1 for i, k in enumerate(group_keys)}
-
     final_usage_df['group'] = final_usage_df['tmp_taxon_id'].map(group_id_map)
 
     # 存入資料庫
