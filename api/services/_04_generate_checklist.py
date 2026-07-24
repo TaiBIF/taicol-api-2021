@@ -535,7 +535,7 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references,
 
     # (d) 預先批次撈「補原始名」可能用到的 taxon_names（取代迴圈內 N 次的 DB query）
     orig_lookup = {}
-    if completeness in ('full', 'concise'):
+    if completeness in ('full', 'selected'):
         accepted_name_ids = total_df[
             (total_df.is_latest == True) & (total_df.taxon_status == 'accepted')
         ].taxon_name_id.unique()
@@ -625,7 +625,7 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references,
 
             # full / concise：取得最新有效學名對應的 original_taxon_name_id（可能為 None）
             original_taxon_name_id = None
-            if completeness in ('full', 'concise'):
+            if completeness in ('full', 'selected'):
                 acc_nm = name_df[name_df.taxon_name_id == row.taxon_name_id]
                 if not acc_nm.empty and acc_nm.original_taxon_name_id.values[0] is not None:
                     original_taxon_name_id = int(acc_nm.original_taxon_name_id.values[0])
@@ -699,8 +699,8 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references,
                         prop_records_by_name=prop_records_by_name,
                         name_by_id=name_by_id)
 
-                # concise 模式：accepted 一律保留；其餘依規則2（保護名）或規則1（per_usages 含 references 內的 ref）
-                if completeness == 'concise' and rrr.get('taxon_status') != 'accepted':
+                # selected 模式：accepted 一律保留；其餘依規則2（保護名）或規則1（per_usages 含 references 內的 ref）
+                if completeness == 'selected' and rrr.get('taxon_status') != 'accepted':
                     keep = (rrr.get('taxon_name_id') == original_taxon_name_id)  # 規則2
                     if not keep:
                         ref_ids = {u.get('reference_id') for u in now_per_usages}  # 規則1
@@ -713,7 +713,7 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references,
                 final_usages.append(now_dict)
 
             # full / concise：若最新有效學名的 original_taxon_name_id 不在本群 rows 中，補一筆原始名的 not-accepted
-            if completeness in ('full', 'concise') and original_taxon_name_id is not None \
+            if completeness in ('full', 'selected') and original_taxon_name_id is not None \
                     and original_taxon_name_id not in rows.taxon_name_id.values:
                 orig_row = orig_lookup.get(original_taxon_name_id)
                 if orig_row:
