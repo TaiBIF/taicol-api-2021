@@ -167,7 +167,7 @@ def escape_solr_query(string):
     final_string = ''
     for s in string:
         if s in spe_chars:
-            final_string += f'\{s}'
+            final_string += f'\\{s}'
         else:
             final_string += s
     return final_string
@@ -189,10 +189,8 @@ def get_conditioned_solr_search(req):
     # 如果有輸入keyword的話preselect 但是limit offset要加在preselect這邊
     # /.* .*/
 
-
     if taxon_id := req.get('taxon_id'):
         query_list.append('taxon_id:{}'.format(taxon_id))
-
 
     # NOTE 如果有 scientific_name 或 common_name 的話 要先查詢一次 取得taxon_id
 

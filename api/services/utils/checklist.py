@@ -1317,3 +1317,19 @@ def get_per_usages(taxon_name_id, rows, prop_df_, name_df, ref_df, conn,
             per_usages = []
 
     return per_usages
+
+
+def get_taicol_parent_name_map(taxon_id_list):
+    """taxon_id -> 該 taxon 的 parent 分類群的 accepted_taxon_name_id"""
+    if not len(taxon_id_list):
+        return {}
+    conn = get_conn()
+    with conn.cursor() as cursor:
+        cursor.execute('''
+            SELECT t.taxon_id, p.accepted_taxon_name_id
+            FROM api_taxon t
+            LEFT JOIN api_taxon p ON t.parent_taxon_id = p.taxon_id AND p.is_deleted = 0
+            WHERE t.taxon_id IN %s
+        ''', (list(taxon_id_list),))
+        rows = cursor.fetchall()
+    return {r[0]: r[1] for r in rows if r[1] is not None}

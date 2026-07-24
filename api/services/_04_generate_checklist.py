@@ -10,7 +10,6 @@ from api.utils import get_whitelist, sub_lin_ranks, rank_order_map
 from api.services.utils.common import get_conn
 from api.services.utils.checklist import *
 
-
 def build_total_df_default(usage_df, ref_df):
 
     # 202605 拿掉白名單機制
@@ -343,7 +342,7 @@ def build_total_df_taicol(usage_df, taxon_ids, only_in_taiwan, exclude_cultured)
         'rank_id', 'nomenclature_id', 'object_group', 'autonym_group',
         'layer_count', 'publish_year', 'group_id', 'tmp_taxon_id', 'is_latest',
         'taxon_status', 'accepted_taxon_name_id', 'taxon_name_id',
-        'reference_id'
+        'reference_id', 'taxon_id'
     ]]
     total_df = total_df.drop_duplicates().reset_index(drop=True)
 
@@ -352,6 +351,7 @@ def build_total_df_taicol(usage_df, taxon_ids, only_in_taiwan, exclude_cultured)
 
 def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references, classification_view, taxon_ids, completeness, usage_references):
 
+    print(pairs, exclude_cultured, only_in_taiwan, references, classification_view, taxon_ids, completeness, usage_references)
     # 應該先判斷是不是有 accepted_taxon_name_id & taxon_name_id & reference_id 對應的usage需要被刪除
     check_deleted_usages()
 
@@ -383,29 +383,55 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references,
     usage_df.loc[usage_df.parent_taxon_name_id.isin(no_usage_name_ids), 'parent_taxon_name_id'] = None
 
 
-    # 下面不應該從tmp_taxon_id處理 應該處理全部
-    df_for_parent = df_for_prop.merge(usage_df[['ru_id','parent_taxon_name_id','publish_year']], how='left')
+    # taicol 分類觀的 parent 一律改由 api_taxon 解析（見下方 total_grouped 前的處理），
+    # 以下回填與正規化只在其他分類觀使用
+    if classification_view != 'taicol':
+        # 這邊會有對到的parent_taxon_name_id為parent本身的not-accepted name
+        df_for_parent = df_for_prop.merge(usage_df[['ru_id','parent_taxon_name_id','publish_year']], how='left')
 
-    parent_null_taxon_ids = df_for_parent[(df_for_parent.is_latest==True)&(df_for_parent.taxon_status=='accepted')&(df_for_parent.parent_taxon_name_id.isnull())].tmp_taxon_id.unique()
-    for pp in parent_null_taxon_ids:
-        rows = df_for_parent[(df_for_parent.tmp_taxon_id==pp)&(df_for_parent.taxon_status=='accepted')&(df_for_parent.parent_taxon_name_id.notnull())]
-        if len(rows):
-            if len(rows) == 1:
-                newest_ru_id = rows.ru_id.values[0]
-            else:
-                newest_ru_id_list = select_global_latest_ru(rows, ref_df)
-                newest_ru_id = newest_ru_id_list[0]
-            newest_parent = rows[rows.ru_id==newest_ru_id].parent_taxon_name_id.values[0]
-            # 把這個對應到的parent_taxon_name_id 補到最新接受的學名使用
-            accepted_ru_id = df_for_parent[(df_for_parent.tmp_taxon_id==pp)&(df_for_parent.taxon_status=='accepted')&(df_for_parent.is_latest==1)].ru_id.values[0]
-            total_df.loc[total_df.ru_id==accepted_ru_id,'parent_taxon_name_id'] = newest_parent
-            usage_df.loc[usage_df.ru_id==accepted_ru_id,'parent_taxon_name_id'] = newest_parent
+        parent_null_taxon_ids = df_for_parent[(df_for_parent.is_latest==True)&(df_for_parent.taxon_status=='accepted')&(df_for_parent.parent_taxon_name_id.isnull())].tmp_taxon_id.unique()
+        for pp in parent_null_taxon_ids:
+            rows = df_for_parent[(df_for_parent.tmp_taxon_id==pp)&(df_for_parent.taxon_status=='accepted')&(df_for_parent.parent_taxon_name_id.notnull())]
+            if len(rows):
+                if len(rows) == 1:
+                    newest_ru_id = rows.ru_id.values[0]
+                else:
+                    newest_ru_id_list = select_global_latest_ru(rows, ref_df)
+                    newest_ru_id = newest_ru_id_list[0]
+                newest_parent = rows[rows.ru_id==newest_ru_id].parent_taxon_name_id.values[0]
+                # 把這個對應到的parent_taxon_name_id 補到最新接受的學名使用
+                accepted_ru_id = df_for_parent[(df_for_parent.tmp_taxon_id==pp)&(df_for_parent.taxon_status=='accepted')&(df_for_parent.is_latest==1)].ru_id.values[0]
+                total_df.loc[total_df.ru_id==accepted_ru_id,'parent_taxon_name_id'] = newest_parent
+                usage_df.loc[usage_df.ru_id==accepted_ru_id,'parent_taxon_name_id'] = newest_parent
+
+
+        # parent_taxon_name_id 正規化用的對照表
+        # name -> tmp_taxon_id（排除 misapplied；排除一個 name 對到多個分類群的情況）
+        name_taxon_map = df_for_prop[df_for_prop.taxon_status != 'misapplied'][
+            ['taxon_name_id', 'tmp_taxon_id', 'taxon_status']].drop_duplicates()
+
+        name_duplicates = name_taxon_map[name_taxon_map.taxon_status == 'not-accepted']
+        name_duplicates = name_duplicates[name_duplicates.taxon_name_id.duplicated(keep=False)]
+        exclude_pairs = set(zip(name_duplicates['tmp_taxon_id'], name_duplicates['taxon_name_id']))
+        name_taxon_map = name_taxon_map[~name_taxon_map.apply(
+            lambda r: (r['tmp_taxon_id'], r['taxon_name_id']) in exclude_pairs, axis=1)]
+
+        # tmp_taxon_id -> 該群最新有效名
+        accepted_name_map = df_for_prop[
+            (df_for_prop.is_latest == True) & (df_for_prop.taxon_status == 'accepted')
+        ].drop_duplicates('tmp_taxon_id').set_index('tmp_taxon_id')['taxon_name_id'].to_dict()
+
+        name_to_tmp = dict(zip(name_taxon_map.taxon_name_id, name_taxon_map.tmp_taxon_id))
+        parent_name_normalize = {
+            n: (accepted_name_map.get(t), t) for n, t in name_to_tmp.items()
+        }
+
 
     # # 處理屬性
 
     # 以下只處理ru_status = accepted
     prop_df = get_prop_df(total_df.ru_id.to_list()+common_name_rus)
-    prop_df = prop_df.merge(ref_df[['publish_date','type','publish_year','subtitle']], right_index=True, left_on="reference_id")
+    prop_df = prop_df.merge(ref_df[['publish_date','type','publish_year','subtitle']], right_index=True, left_on="reference_id", how='left')
 
     prop_df = select_priority_prop(prop_df)
 
@@ -529,6 +555,12 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references,
                 for orig_id, orig_ref_id, orig_name, orig_rank_id in cursor.fetchall():
                     orig_lookup[orig_id] = (orig_ref_id, orig_name, orig_rank_id)
 
+    if classification_view == 'taicol':
+        parent_name_map = get_taicol_parent_name_map(total_df.taxon_id.unique())
+        mask = (total_df.is_latest == True) & (total_df.taxon_status == 'accepted')
+        total_df['parent_taxon_name_id'] = None
+        total_df.loc[mask, 'parent_taxon_name_id'] = total_df.loc[mask, 'taxon_id'].map(parent_name_map)
+
     # (e) 預先 group by tmp_taxon_id（供主迴圈使用，避免 O(n²) 過濾）
     total_grouped = {k: v for k, v in total_df.groupby('tmp_taxon_id', sort=False)}
     prop_grouped = {k: v for k, v in all_prop_df.groupby('tmp_taxon_id', sort=False)}
@@ -582,6 +614,14 @@ def process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references,
             acc_rows = rows[(rows['is_latest']==True) & (rows['taxon_status'] == 'accepted')]
             row = acc_rows.iloc[0]  # 等同於原本的 total_df.iloc[i]
             parent_taxon_name_id = row.parent_taxon_name_id
+
+            if classification_view != 'taicol' and pd.notna(parent_taxon_name_id):
+                mapped = parent_name_normalize.get(parent_taxon_name_id)
+                if mapped:
+                    mapped_name, mapped_tid = mapped
+                    parent_taxon_name_id = None if mapped_tid == nt else mapped_name
+            elif pd.isna(parent_taxon_name_id):
+                parent_taxon_name_id = None
 
             # full / concise：取得最新有效學名對應的 original_taxon_name_id（可能為 None）
             original_taxon_name_id = None
