@@ -957,14 +957,14 @@ class TaxonView(APIView):
                 # not_official
                 is_list = ['is_hybrid','is_in_taiwan','is_endemic','is_fossil','is_terrestrial','is_freshwater','is_brackish','is_marine','not_official']
                 df[is_list] = df[is_list].replace({0: False, 1: True, '0': False, '1': True, 'true': True, 'false': False})
-                df['is_in_taiwan'] = df['is_in_taiwan'].replace({2: False, '2': False, None: False})
 
                 # cites要改成 I,II,III
                 df['cites'] = df['cites'].apply(lambda x: x.replace('1','I').replace('2','II').replace('3','III') if x else x)
-                # df['redlist'] = df['redlist'].apply(lambda x: redlist_map_rev[x] if x else x)
 
                 df = df.replace({np.nan: None, '': None})
                 df['name_id'] = df['name_id'].replace({np.nan: 0}).astype('int64').replace({0: None})
+
+                df['is_in_taiwan'] = df['is_in_taiwan'].replace({2: False, '2': False, None: False})  # 移到這裡 確保 null → False
 
                 df = df[cols]
             else:
