@@ -94,10 +94,11 @@ def _check_autonym_object_group(conn, df, now):
     
     rows_to_check = problematic_refs[problematic_refs.object_group.isin(oo_to_check)].merge(df)
     rows_to_check = rows_to_check.fillna(0)
-    
+
+    sub = rows_to_check[['ru_id', 'autonym_group', 'object_group']]
     batch = [
-        (row['ru_id'], row.get('autonym_group'), row['object_group'], 0, 0, 0, 2, 1)
-        for _, row in rows_to_check.iterrows()
+        (ru, ag, og, 0, 0, 0, 2, 1)
+        for ru, ag, og in sub.itertuples(index=False, name=None)
     ]
     _insert_or_update_usage_check_batch(conn, batch, now)
 
@@ -115,10 +116,11 @@ def _check_usage_key_constraint(conn, df, now):
     
     problematic = grouped[(grouped.status_count > 1) | (grouped.ru_count > 1)]
     problematic = problematic.fillna(0)
-    
+
+    sub = problematic[['accepted_taxon_name_id', 'taxon_name_id', 'reference_id']]
     batch = [
-        (0, 0, 0, row['accepted_taxon_name_id'], row['taxon_name_id'], row['reference_id'], 5, 3)
-        for _, row in problematic.iterrows()
+        (0, 0, 0, a, t, r, 5, 3)
+        for a, t, r in sub.itertuples(index=False, name=None)
     ]
     _insert_or_update_usage_check_batch(conn, batch, now)
 
@@ -136,10 +138,11 @@ def _check_taxon_name_in_multiple_groups(conn, df, now):
     grouped = filtered_df.groupby(['reference_id', 'taxon_name_id'], as_index=False).count()
     problematic = grouped[grouped.accepted_taxon_name_id > 1]
     problematic = problematic.fillna(0)
-    
+
+    sub = problematic[['taxon_name_id', 'reference_id']]
     batch = [
-        (0, 0, 0, 0, row['taxon_name_id'], row['reference_id'], 6, 2)
-        for _, row in problematic.iterrows()
+        (0, 0, 0, 0, t, r, 6, 2)
+        for t, r in sub.itertuples(index=False, name=None)
     ]
     _insert_or_update_usage_check_batch(conn, batch, now)
 
@@ -164,7 +167,7 @@ def _get_reference_usage_data(conn):
         data = cursor.fetchall()
         
     df = pd.DataFrame(data, columns=[
-        'ru_id', 'ru_status', 'accepted_taxon_name_id', 'taxon_name_id', 
+        'ru_id', 'ru_status', 'accepted_taxon_name_id', 'taxon_name_id',
         'reference_id', 'object_group', 'autonym_group', 'check_list_type'
     ])
     
@@ -178,7 +181,7 @@ def _get_reference_usage_data(conn):
 
 
 def _get_reference_data(conn):
-    """獲取 reference 資料用於 Type 12 檢查"""
+    """獲取 reference 資料用於 Type  檢查"""
     query = """
         SELECT r.id, r.publish_year, r.type, ac.publish_date, 
                r.properties ->> '$.book_title' as book_title,
@@ -211,10 +214,11 @@ def _insert_or_update_usage_check_batch(conn, data_list, now):
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE updated_at = %s
     """
-    
+
+    params = [(*data, now, now) for data in data_list]
+
     with conn.cursor() as cursor:
-        for data in data_list:
-            cursor.execute(query, (*data, now, now))
+        cursor.executemany(query, params)
         conn.commit()
 
 def _check_deleted_fixed_usages(conn, now):
@@ -259,10 +263,11 @@ def _check_multiple_accepted_same_object_group(conn, df, now):
         df[df.ru_status == 'accepted']
     )
     rows_to_check = rows_to_check.fillna(0)
-    
+
+    sub = rows_to_check[['ru_id', 'autonym_group', 'object_group']]
     batch = [
-        (row['ru_id'], row.get('autonym_group'), row['object_group'], 0, 0, 0, 4, 1)
-        for _, row in rows_to_check.iterrows()
+        (ru, ag, og, 0, 0, 0, 4, 1)
+        for ru, ag, og in sub.itertuples(index=False, name=None)
     ]
     _insert_or_update_usage_check_batch(conn, batch, now)
 
@@ -273,17 +278,18 @@ def _check_multiple_accepted_names(conn, df, now):
     accepted_pairs = df[df.ru_status == 'accepted'][
         ['accepted_taxon_name_id', 'reference_id', 'ru_status']
     ].drop_duplicates()
-    
-    grouped = accepted_pairs.groupby(['accepted_taxon_name_id', 'reference_id'], 
-                                   as_index=False).count()
+
+    grouped = accepted_pairs.groupby(['accepted_taxon_name_id', 'reference_id'],
+                                     as_index=False).count()
     merged = all_pairs.merge(grouped, how='left')
     
     multiple_accepted = merged[merged.ru_status > 1]
     multiple_accepted = multiple_accepted.fillna(0)
-    
+
+    sub = multiple_accepted[['accepted_taxon_name_id', 'reference_id']]
     batch = [
-        (0, 0, 0, row['accepted_taxon_name_id'], 0, row['reference_id'], 7, 0)
-        for _, row in multiple_accepted.iterrows()
+        (0, 0, 0, a, 0, r, 7, 0)
+        for a, r in sub.itertuples(index=False, name=None)
     ]
     _insert_or_update_usage_check_batch(conn, batch, now)
 
@@ -294,34 +300,18 @@ def _check_no_accepted_names(conn, df, now):
     accepted_pairs = df[df.ru_status == 'accepted'][
         ['accepted_taxon_name_id', 'reference_id', 'ru_status']
     ].drop_duplicates()
-    
-    grouped = accepted_pairs.groupby(['accepted_taxon_name_id', 'reference_id'], 
-                                   as_index=False).count()
+
+    grouped = accepted_pairs.groupby(['accepted_taxon_name_id', 'reference_id'],
+                                     as_index=False).count()
     merged = all_pairs.merge(grouped, how='left')
     
     no_accepted = merged[merged.ru_status.isna()]
     no_accepted = no_accepted.fillna(0)
-    
-    batch = [
-        (0, 0, 0, row['accepted_taxon_name_id'], 0, row['reference_id'], 8, 0)
-        for _, row in no_accepted.iterrows()
-    ]
-    _insert_or_update_usage_check_batch(conn, batch, now)
 
-
-def _check_taxon_name_in_multiple_groups(conn, df, now):
-    """Error type 9: 檢查同一個學名出現在同一篇文獻中的兩個分類群且不是誤用"""
-    filtered_df = df[df.ru_status != 'misapplied'][
-        ['accepted_taxon_name_id', 'reference_id', 'taxon_name_id']
-    ].drop_duplicates()
-    
-    grouped = filtered_df.groupby(['reference_id', 'taxon_name_id'], as_index=False).count()
-    problematic = grouped[grouped.accepted_taxon_name_id > 1]
-    problematic = problematic.fillna(0)
-    
+    sub = no_accepted[['accepted_taxon_name_id', 'reference_id']]
     batch = [
-        (0, 0, 0, 0, row['taxon_name_id'], row['reference_id'], 9, 2)
-        for _, row in problematic.iterrows()
+        (0, 0, 0, a, 0, r, 8, 0)
+        for a, r in sub.itertuples(index=False, name=None)
     ]
     _insert_or_update_usage_check_batch(conn, batch, now)
 
@@ -354,76 +344,80 @@ def _check_cannot_decide_latest(conn, df, ref_df, now):
 
 
 def _check_cannot_decide_by_dimension(conn, df, ref_df, dimension, now):
-    """檢查指定維度是否有無法決出最新文獻的情況"""
-    
+    """檢查指定維度是否有無法決出最新文獻的情況（向量化版）"""
+
     # 先找出有多個 reference_id 的分組
     multi_ref = df.groupby(dimension)['reference_id'].nunique()
     multi_ref = multi_ref[multi_ref > 1].index
-    
     if len(multi_ref) == 0:
         return
-    
-    # 只處理有多個 reference_id 的記錄
+
     df_filtered = df[df[dimension].isin(multi_ref)].copy()
-    
     df_filtered = df_filtered.merge(
-        ref_df[['type', 'publish_date', 'publish_year', 'book_title', 'volume', 'issue']], 
-        right_index=True, 
-        left_on='reference_id',
-        how='left'
+        ref_df[['type', 'publish_date', 'publish_year', 'book_title', 'volume', 'issue']],
+        right_index=True, left_on='reference_id', how='left'
     )
-    df_filtered['publish_date'] = pd.to_datetime(df_filtered['publish_date'], errors='coerce')
-    
-    def filter_latest(grp):
-        """套用文獻優先性邏輯，回傳篩選後的結果"""
-        if grp['reference_id'].nunique() <= 1:
-            return grp.head(0)  # 不需要檢查
-        
-        # Step 1: type 優先性
-        if (grp['type'] == 6).any():
-            grp = grp[grp['type'] == 6]
-        else:
-            if (grp['type'] != 4).any():
-                grp = grp[grp['type'] != 4]
-            if (grp['type'] != 5).any():
-                grp = grp[grp['type'] != 5]
-        
-        if grp['reference_id'].nunique() <= 1:
-            return grp.head(0)
-        
-        # Step 2: publish_year
-        max_year = grp['publish_year'].max()
-        grp = grp[grp['publish_year'] == max_year]
-        
-        if grp['reference_id'].nunique() <= 1:
-            return grp.head(0)
-        
-        # Step 3: publish_date
-        if grp['publish_date'].notna().any():
-            max_date = grp['publish_date'].max()
-            grp = grp[grp['publish_date'] == max_date]
-        
-        if grp['reference_id'].nunique() <= 1:
-            return grp.head(0)
-        
-        # Step 4: 多章節（同書同卷號）
-        ref_subset = ref_df[ref_df.index.isin(grp['reference_id'])]
-        if len(ref_subset) > 0 and ref_subset[['book_title', 'volume', 'issue']].nunique().max() == 1:
-            return grp.head(0)  # 同一本書，可以決出
-        
-        # 仍有多個 reference_id → 無法決出
-        return grp
-    
-    result = df_filtered.groupby(dimension, group_keys=False).apply(filter_latest)
-    
-    if result.empty:
+
+    # 所有篩選條件都只跟 reference_id 有關，先壓縮成「每個 (維度, reference_id) 一列」，
+    # 大幅減少後續 groupby 的資料量，此時 nunique(reference_id) 等同於分組列數
+    u = df_filtered[[dimension, 'reference_id', 'type', 'publish_year',
+                     'publish_date', 'book_title', 'volume', 'issue']].drop_duplicates(
+        subset=[dimension, 'reference_id'])
+
+    def keep_multi(frame):
+        """只保留仍有 >1 個 reference 的分組"""
+        return frame[frame.groupby(dimension)['reference_id'].transform('size') > 1]
+
+    # Step 1: type 優先性
+    u['_is6'] = u['type'] == 6
+    has6 = u.groupby(dimension)['_is6'].transform('max').astype(bool)
+    u = u[(~has6) | (u['type'] == 6)]
+
+    # 分組非全同 type 時才移除 4、5（順序：先移 4，再依移除後的狀態判斷是否移 5）
+    tmin = u.groupby(dimension)['type'].transform('min')
+    tmax = u.groupby(dimension)['type'].transform('max')
+    u = u[~((u['type'] == 4) & ~((tmin == 4) & (tmax == 4)))]
+
+    tmin = u.groupby(dimension)['type'].transform('min')
+    tmax = u.groupby(dimension)['type'].transform('max')
+    u = u[~((u['type'] == 5) & ~((tmin == 5) & (tmax == 5)))]
+
+    u = keep_multi(u)
+    if u.empty:
         return
-    
+
+    # Step 2: publish_year 取最大
+    u = u[u['publish_year'] == u.groupby(dimension)['publish_year'].transform('max')]
+    u = keep_multi(u)
+    if u.empty:
+        return
+
+    # Step 3: 分組內有非空 publish_date 時，取最大
+    has_date = u.groupby(dimension)['publish_date'].transform('count') > 0
+    max_date = u.groupby(dimension)['publish_date'].transform('max')
+    u = u[(~has_date) | (u['publish_date'] == max_date)]
+    u = keep_multi(u)
+    if u.empty:
+        return
+
+    # Step 4: 同書同卷號（book_title/volume/issue 皆唯一）視為可決出，排除之
+    bt = u.groupby(dimension)['book_title'].transform('nunique')
+    vol = u.groupby(dimension)['volume'].transform('nunique')
+    iss = u.groupby(dimension)['issue'].transform('nunique')
+    decidable = np.maximum(np.maximum(bt, vol), iss) == 1
+    u = u[~decidable]
+    if u.empty:
+        return
+
+    # u 內剩下的 (維度, reference_id) 即無法決出者，撈回原始 ru 列
+    survivors = u[[dimension, 'reference_id']].drop_duplicates()
+    result = df_filtered.merge(survivors, on=[dimension, 'reference_id'])
+
     result = result.fillna(0)
+    sub = result[['ru_id', 'autonym_group', 'object_group',
+                  'accepted_taxon_name_id', 'taxon_name_id', 'reference_id']]
     batch = [
-        (row['ru_id'], row.get('autonym_group'), row.get('object_group'),
-         row['accepted_taxon_name_id'], row['taxon_name_id'],
-         row['reference_id'], 12, 0)
-        for _, row in result.iterrows()
+        (ru, ag, og, a, t, r, 12, 0)
+        for ru, ag, og, a, t, r in sub.itertuples(index=False, name=None)
     ]
     _insert_or_update_usage_check_batch(conn, batch, now)
