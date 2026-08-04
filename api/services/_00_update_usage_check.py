@@ -206,20 +206,21 @@ def _insert_or_update_usage_check_batch(conn, data_list, now):
     """批次插入或更新"""
     if not data_list:
         return
-    
+
     query = """
-        INSERT INTO api_usage_check (reference_usage_id, autonym_group, object_group, 
-                                   accepted_taxon_name_id, taxon_name_id, reference_id, 
-                                   error_type, whitelist_type, updated_at) 
+        INSERT INTO api_usage_check (reference_usage_id, autonym_group, object_group,
+                                   accepted_taxon_name_id, taxon_name_id, reference_id,
+                                   error_type, whitelist_type, updated_at)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ON DUPLICATE KEY UPDATE updated_at = %s
+        ON DUPLICATE KEY UPDATE updated_at = VALUES(updated_at)
     """
 
-    params = [(*data, now, now) for data in data_list]
+    params = [(*data, now) for data in data_list]
 
     with conn.cursor() as cursor:
         cursor.executemany(query, params)
         conn.commit()
+
 
 def _check_deleted_fixed_usages(conn, now):
     """Error type 1: 檢查被刪除的fixed usage_id"""
