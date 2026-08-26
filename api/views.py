@@ -1,4 +1,3 @@
-
 # from django.shortcuts import render
 from django.http import (
     JsonResponse,
@@ -1485,7 +1484,7 @@ def handle_batch_full_update(taxon_ids: List[str]):
         
         # 查詢所有 taxon_id 的資料
         placeholders = ','.join(['%s'] * len(taxon_ids))
-        query = f"SELECT taxon_id, content FROM api_for_solr WHERE taxon_id IN ({placeholders})"
+        query = f"SELECT taxon_id, content FROM api_for_solr WHERE taxon_id IN ({placeholders}) AND update_type = 'full'"
         
         taxon_data_map = {}
         
@@ -1516,7 +1515,7 @@ def handle_batch_full_update(taxon_ids: List[str]):
         if success:
             # 清理資料庫中的臨時資料
             with conn.cursor() as cursor:
-                cursor.execute(f"DELETE FROM api_for_solr WHERE taxon_id IN ({placeholders})", taxon_ids)
+                cursor.execute(f"DELETE FROM api_for_solr WHERE taxon_id IN ({placeholders}) AND update_type = 'full'", taxon_ids)
                 conn.commit()
             
             stats = updater.get_stats()
@@ -1552,7 +1551,7 @@ def handle_batch_partial_update(taxon_ids: List[str]):
         
         # 查詢所有 taxon_id 的更新資料
         placeholders = ','.join(['%s'] * len(taxon_ids))
-        query = f"SELECT taxon_id, content, updated_at FROM api_for_solr WHERE taxon_id IN ({placeholders})"
+        query = f"SELECT taxon_id, content, updated_at FROM api_for_solr WHERE taxon_id IN ({placeholders}) AND update_type = 'partial'"
         
         taxon_updates_map = {}
         
@@ -1588,7 +1587,7 @@ def handle_batch_partial_update(taxon_ids: List[str]):
         if success:
             # 清理資料庫
             with conn.cursor() as cursor:
-                cursor.execute(f"DELETE FROM api_for_solr WHERE taxon_id IN ({placeholders})", taxon_ids)
+                cursor.execute(f"DELETE FROM api_for_solr WHERE taxon_id IN ({placeholders}) AND update_type = 'partial'", taxon_ids)
                 conn.commit()
             
             return JsonResponse({
