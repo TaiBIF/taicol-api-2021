@@ -1297,25 +1297,48 @@ class NameView(APIView):
         return HttpResponse(json.dumps(response, ensure_ascii=False, cls=DateTimeEncoder), content_type="application/json,charset=utf-8")
     
 
+def get_client_ip(request):
+    """取得客戶端真實 IP 的輔助函式"""
+    x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
+    if x_forwarded_for:
+        # HTTP_X_FORWARDED_FOR 可能包含多個 IP (Client, Proxy1, Proxy2)，第一位為真實 Client IP
+        ip = x_forwarded_for.split(",")[0].strip()
+    else:
+        # 無代理伺服器時（如本機測試），取 REMOTE_ADDR
+        ip = request.META.get("REMOTE_ADDR")
+    return ip
+
+
 def update_check_usage(request):
     try:
-        # 只接受從工具傳來的request
-        # 用ip來判斷
-        ALLOWED_HOST_FOR_USAGE_CHECK = env.list('ALLOWED_HOST_FOR_USAGE_CHECK')
-        for host in ALLOWED_HOST_FOR_USAGE_CHECK:
-            if host in request.META.get('HTTP_X_FORWARDED_FOR'):
-                a = check_taxon_usage()
-                response = {"status": {"code": 200, "message": "Usage checked!"}}
-                break
-            else:
-                response = {"status": {"code": 403, "message": "Forbidden"}}
+        # 如果是 DEBUG 模式或開啟跳過檢查，直接通過
+        if env('DEBUG'):  # 或使用 env.bool('BYPASS_IP_CHECK', False)
+            is_allowed = True
+        else:
+            ALLOWED_HOST_FOR_USAGE_CHECK = env.list(
+                "ALLOWED_HOST_FOR_USAGE_CHECK"
+            )
+            client_ip = get_client_ip(request)
+            is_allowed = client_ip in ALLOWED_HOST_FOR_USAGE_CHECK
+
+        if is_allowed:
+            a = check_taxon_usage()
+            response = {"status": {"code": 200, "message": "Usage checked!"}}
+            status_code = 200
+        else:
+            response = {"status": {"code": 403, "message": "Forbidden"}}
+            status_code = 403
 
     except Exception as er:
-        print(er)
+        print(f"Error: {er}")
         response = {"status": {"code": 500, "message": "Unexpected Error"}}
+        status_code = 500
 
-    return HttpResponse(json.dumps(response))
-
+    return HttpResponse(
+        json.dumps(response),
+        content_type="application/json",
+        status=status_code,
+    )
 
 # 給工具使用的API
 def get_taxon_by_higher(request):
@@ -1430,10 +1453,10 @@ def update_solr(request):
     if not token or not is_valid_token(token):
         return JsonResponse({'status': 'token error'}, status=401)
     
-    # 獲取參數
-    update_type = request.GET.get('update_type', 'full')
-    taxon_ids_param = request.GET.get('taxon_ids', '')
-    
+    # 獲取參數（同時支援 GET query 與 POST body，POST 可避免 taxon_ids 過長撐爆 URL）
+    update_type = request.POST.get('update_type') or request.GET.get('update_type', 'full')
+    taxon_ids_param = request.POST.get('taxon_ids') or request.GET.get('taxon_ids', '')
+
     if not taxon_ids_param:
         return JsonResponse({'status': 'missing taxon_ids'}, status=400)
     
