@@ -1443,6 +1443,7 @@ from api.services._03_update_solr import BatchOptimizedSolrTaxonUpdater
 import time
 
 # 新的批次更新 API
+@csrf_exempt
 def update_solr(request):
     """
     批次更新 Solr API
