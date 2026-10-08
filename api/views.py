@@ -1,11 +1,7 @@
-# from django.shortcuts import render
 from django.http import (
     JsonResponse,
-    # HttpResponseRedirect,
-    # Http404,
     HttpResponse,
 )
-# from django.core.paginator import Paginator
 import json
 import pymysql
 from conf.settings import env, SOLR_PREFIX
@@ -20,7 +16,6 @@ from drf_yasg import openapi
 
 from api.services._00_update_usage_check import check_taxon_usage
 from api.utils import *
-# from api.utils_for_usage import *
 import requests
 from django.views.decorators.csrf import csrf_exempt
 from sqlalchemy import create_engine
@@ -632,6 +627,48 @@ class ReferencesView(APIView):
         return HttpResponse(json.dumps(response, ensure_ascii=False, cls=DateTimeEncoder), content_type="application/json,charset=utf-8")
 
 
+HIGHER_TAXA_FL = 'taxon_id,accepted_taxon_name_id,simple_name,name_author,formatted_accepted_name,taxon_rank_id,common_name_c'
+
+
+def build_higher_taxa(path_ids, docs):
+    """依 path 上的 taxon_id 與 Solr docs 組出 higherTaxa 陣列（含補地位未定階層）"""
+    docs = [d for d in docs if d.get('taxon_id') in path_ids]
+    if not docs:
+        return []
+    higher = pd.DataFrame(docs)
+    for m in HIGHER_TAXA_FL.split(','):
+        if m not in higher.keys():
+            higher[m] = None
+    higher = higher.rename(columns={'accepted_taxon_name_id': 'name_id', 'formatted_accepted_name': 'formatted_name',
+                                    'taxon_rank_id': 'rank_id'})
+    higher['rank_id'] = higher['rank_id'].apply(int)
+    higher['rank_order'] = higher['rank_id'].apply(lambda x: rank_order_map[x])
+
+    # 補上階層未定
+    current_rank_orders = higher.rank_order.to_list()
+    for x in lin_map.keys():
+        now_order = lin_map_w_order[x]['rank_order']
+        if now_order not in current_rank_orders and now_order < max(current_rank_orders) and now_order > min(current_rank_orders):
+            higher = pd.concat([higher, pd.Series({'rank_id': x, 'common_name_c': '地位未定', 'taxon_id': None, 'rank_order': lin_map_w_order[x]['rank_order']}).to_frame().T], ignore_index=True)
+
+    # 從最大的rank開始補
+    higher = higher.sort_values('rank_order', ignore_index=True, ascending=False)
+    higher = higher.replace({np.nan: None})
+    for hi in higher[higher.taxon_id.isnull()].index:
+        # 病毒域可能會找不到東西補
+        found_hi = hi + 1
+        if found_hi < len(higher):
+            while not higher.loc[found_hi].taxon_id:
+                found_hi += 1
+        higher.loc[hi, 'simple_name'] = f'{higher.loc[found_hi].simple_name} {lin_map[higher.loc[hi]["rank_id"]]} incertae sedis'
+        higher.loc[hi, 'common_name_c'] = '地位未定'
+    higher = higher.replace({np.nan: None, '': None})
+    higher['rank'] = higher['rank_id'].apply(lambda x: rank_map[x])
+    higher = higher.replace({np.nan: None, '': None})
+    higher['name_id'] = higher['name_id'].replace({np.nan: 0}).astype('int64').replace({0: None})
+    return higher[['taxon_id','name_id','simple_name','name_author','formatted_name','rank','common_name_c']].to_dict(orient='records')
+
+
 class HigherTaxaView(APIView):
     @swagger_auto_schema(
         operation_summary='取得較高階層',
@@ -669,43 +706,9 @@ class HigherTaxaView(APIView):
                             path = path.split('>')
                             path_str = ' OR '.join(path)
                             # NOTE 這邊可能會需要query已經刪除的taxon
-                            path_resp = requests.get(f'{SOLR_PREFIX}taxa/select?fq=taxon_name_id:*&fq=status:accepted&q=taxon_id:({path_str})&fl=taxon_id,accepted_taxon_name_id,simple_name,name_author,formatted_accepted_name,taxon_rank_id,common_name_c&rows=1000')
+                            path_resp = requests.get(f'{SOLR_PREFIX}taxa/select?fq=taxon_name_id:*&fq=status:accepted&q=taxon_id:({path_str})&fl={HIGHER_TAXA_FL}&rows=1000')
                             if path_resp.status_code == 200:
-                                higher = pd.DataFrame(path_resp.json()['response']['docs'])
-                                musthave_cols = ['taxon_id','accepted_taxon_name_id','simple_name','name_author','formatted_accepted_name','taxon_rank_id','common_name_c']
-                                for m in musthave_cols:
-                                    if m not in higher.keys():
-                                        higher[m] = None
-                                higher = higher.rename(columns={'accepted_taxon_name_id': 'name_id', 'formatted_accepted_name': 'formatted_name',
-                                                                'taxon_rank_id': 'rank_id'})
-                                higher['rank_id'] = higher['rank_id'].apply(int)
-                                higher['rank_order'] = higher['rank_id'].apply(lambda x: rank_order_map[x])
-                                
-                                # rank_order
-                                # 補上階層未定 
-                                # 先找出應該要有哪些林奈階層
-                                current_rank_orders = higher.rank_order.to_list()
-                                for x in lin_map.keys():
-                                    now_order = lin_map_w_order[x]['rank_order']
-                                    if now_order not in current_rank_orders and now_order < max(current_rank_orders) and now_order > min(current_rank_orders):
-                                        higher = pd.concat([higher, pd.Series({'rank_id': x, 'common_name_c': '地位未定', 'taxon_id': None, 'rank_order': lin_map_w_order[x]['rank_order']}).to_frame().T], ignore_index=True)
-
-                                # 從最大的rank開始補
-                                higher = higher.sort_values('rank_order', ignore_index=True, ascending=False)
-                                higher = higher.replace({np.nan: None})
-                                for hi in higher[higher.taxon_id.isnull()].index:
-                                    # 病毒域可能會找不到東西補 
-                                    found_hi = hi + 1
-                                    if found_hi < len(higher):
-                                        while not higher.loc[found_hi].taxon_id:
-                                            found_hi += 1
-                                    higher.loc[hi, 'simple_name'] = f'{higher.loc[found_hi].simple_name} {lin_map[higher.loc[hi]["rank_id"]]} incertae sedis'
-                                    higher.loc[hi, 'common_name_c'] = '地位未定'
-                                higher = higher.replace({np.nan: None, '': None})
-                                higher['rank'] = higher['rank_id'].apply(lambda x: rank_map[x])
-                                higher = higher.replace({np.nan: None, '': None})
-                                higher['name_id'] = higher['name_id'].replace({np.nan: 0}).astype('int64').replace({0: None})
-                                data = higher[['taxon_id','name_id','simple_name','name_author','formatted_name','rank','common_name_c']].to_dict(orient='records')
+                                data = build_higher_taxa(path, path_resp.json()['response']['docs'])
 
             response = {"status": {"code": 200, "message": "Success"},
                         "data": data}
@@ -945,7 +948,7 @@ class TaxonView(APIView):
                 # 欄位順序
                 cols = ['taxon_id', 'taxon_status', 'name_id','simple_name', 'name_author', 'formatted_name', 'synonyms', 'formatted_synonyms', 'misapplied', 'formatted_misapplied',
                         'rank', 'common_name_c', 'alternative_name_c', 'kingdom', 'is_hybrid', 'is_endemic', 'is_in_taiwan', 'alien_type', 'alien_status_note', 'is_fossil', 'is_terrestrial', 'is_freshwater', 'is_brackish',
-                        'is_marine','not_official', 'cites', 'iucn', 'redlist', 'protected', 'sensitive', 'created_at', 'updated_at', 'new_taxon_id', 'parent_taxon_id']
+                        'is_marine','not_official', 'cites', 'iucn', 'redlist', 'protected', 'sensitive', 'created_at', 'updated_at', 'new_taxon_id', 'parent_taxon_id', 'higher_taxa']
 
                 for c in cols:
                     if c not in df.keys():
@@ -964,6 +967,19 @@ class TaxonView(APIView):
                 df['name_id'] = df['name_id'].replace({np.nan: 0}).astype('int64').replace({0: None})
 
                 df['is_in_taiwan'] = df['is_in_taiwan'].replace({2: False, '2': False, None: False})  # 移到這裡 確保 null → False
+
+                # highertaxa：收集本頁所有 path 上的 taxon_id，一次查回 Solr 再分配
+                df['higher_taxa'] = [[] for _ in range(len(df))]
+                if 'path' in df.columns:
+                    paths = df['path'].apply(lambda x: x.split('>') if x else [])
+                    all_ids = sorted(set(i for p in paths for i in p))
+                    if all_ids:
+                        higher_query = {"query": f"taxon_id:({' OR '.join(all_ids)})",
+                                        "filter": ['taxon_name_id:*', 'status:accepted'],
+                                        "fields": HIGHER_TAXA_FL.split(','),
+                                        "limit": len(all_ids) * 2}
+                        higher_docs = requests.post(f'{SOLR_PREFIX}taxa/select?', json=higher_query).json()['response']['docs']
+                        df['higher_taxa'] = paths.apply(lambda p: build_higher_taxa(p, higher_docs) if p else [])
 
                 df = df[cols]
             else:
@@ -1241,20 +1257,21 @@ class NameView(APIView):
 
                     # Solr 查詢 (Taxon Status)
                     df['taxon'] = '[]'
+                    df['kingdom'] = None
                     if not df.empty:
                         try:
                             # 查詢 Solr
                             query_solr = {
                                 "query": "*:*", "offset": 0, "limit": 10000, 
                                 "filter": [f'taxon_name_id:({" OR ".join(df.name_id.astype(str))})', 'is_deleted:false'],
-                                "fields": ['taxon_id', 'status', 'is_in_taiwan', 'taxon_name_id']
+                                "fields": ['taxon_id', 'status', 'is_in_taiwan', 'taxon_name_id', 'kingdom']
                             }
                             resp = requests.post(f'{SOLR_PREFIX}taxa/select?', json=query_solr).json()
                             solr_docs = resp.get('response', {}).get('docs', [])
                             if solr_docs:
                                 t_df = pd.DataFrame(solr_docs)
                                 # 補上可能缺少的欄位
-                                for col in ['is_in_taiwan']:
+                                for col in ['is_in_taiwan', 'kingdom']:
                                     if col not in t_df.columns:
                                         t_df[col] = None
                                 t_df['taxon_name_id'] = t_df['taxon_name_id'].astype(int)
@@ -1268,6 +1285,11 @@ class NameView(APIView):
                                     result = g[['taxon_id', 'status', 'is_in_taiwan']].rename(columns={'status': 'taicol_name_status'}).to_dict('records')
                                     return result
                                 taxon_map = t_df.groupby('taxon_name_id').apply(process_solr_group).to_dict()
+                                # kingdom：同一學名可能對應多個 taxon，取 accepted 優先的第一個非空值
+                                k_df = t_df[t_df['kingdom'].notna() & (t_df['kingdom'] != '')].copy()
+                                k_df['sort_val'] = k_df['status'].map({'accepted': 0, 'not-accepted': 1, 'misapplied': 2}).fillna(9)
+                                kingdom_map = k_df.sort_values('sort_val').groupby('taxon_name_id')['kingdom'].first().to_dict()
+                                df['kingdom'] = df['name_id'].map(kingdom_map)
                                 # 注意：這裡要將 dict 轉回 json string 還是 list，依前端需求，原程式碼是 List of Dicts
                                 df['taxon'] = df['name_id'].map(taxon_map).fillna(pd.Series([[]] * len(df)))
                         except Exception as e:
@@ -1275,7 +1297,7 @@ class NameView(APIView):
 
                     # 最終欄位整理
                     df = df.replace({np.nan: None})
-                    final_columns = ['name_id', 'nomenclature_name', 'rank', 'simple_name', 'name_author', 
+                    final_columns = ['name_id', 'nomenclature_name', 'kingdom', 'rank', 'simple_name', 'name_author', 
                                      'formatted_name', 'name', 'original_name_id', 'is_hybrid', 'hybrid_parent', 
                                      'protologue', 'type_name_id', 'namecode', 'taxon', 'is_deleted', 'created_at', 'updated_at']
                     
