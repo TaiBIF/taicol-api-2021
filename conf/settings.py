@@ -25,7 +25,8 @@ environ.Env.read_env(os.path.join(BASE_DIR, '.env'))
 # See https://docs.djangoproject.com/en/3.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'gt3n3#ta%@6z*7mfkyp!21&u#(d&bv35!*4if6mjplws)bdt8*'
+# 改由 .env 設定；未設定時才退回舊值（正式站請務必在 .env 設定新的 SECRET_KEY）
+SECRET_KEY = env('SECRET_KEY', default='gt3n3#ta%@6z*7mfkyp!21&u#(d&bv35!*4if6mjplws)bdt8*')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = env('DEBUG')

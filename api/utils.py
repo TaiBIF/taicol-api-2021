@@ -1,4 +1,5 @@
 import re
+import ast
 from conf.settings import env, SOLR_PREFIX
 import pymysql
 import pandas as pd
@@ -27,6 +28,62 @@ def validate(date_text):
         return False
 
 
+# TaiCOL taxon_id 格式：t + 7 位數字
+TAXON_ID_RE = re.compile(r'^t\d{7}$')
+
+
+def is_valid_taxon_id(value):
+    return bool(value) and bool(TAXON_ID_RE.match(str(value)))
+
+
+def map_values(s, mapping):
+    """取代 Series.replace(dict)，結果（值與 dtype）與 pandas 2.2 舊版 replace 自動 downcast 相同，
+    但不會觸發 'Downcasting behavior in `replace` is deprecated' FutureWarning。"""
+    # 舊版 replace 的 None key 只會比對到 object 欄位中的 NaN；數值欄位的 NaN 保持不變
+    na_to_none_key = None in mapping and s.dtype == object
+    matched = False
+    replaced_with_none = False
+    values = []
+    for x in s.tolist():
+        if x is None or (isinstance(x, float) and x != x):
+            hit = None in mapping and (x is None or na_to_none_key)
+            key = None
+        else:
+            try:
+                hit = x in mapping
+            except TypeError:  # unhashable（例如 list）
+                hit = False
+            key = x
+        if hit:
+            matched = True
+            replaced_with_none = replaced_with_none or mapping[key] is None
+            values.append(mapping[key])
+        else:
+            values.append(x)
+    if not matched:
+        # 沒有任何值被替換：數值 / bool 欄位維持原 dtype；object 欄位舊版仍會嘗試 downcast
+        return s.infer_objects() if s.dtype == object else s.copy()
+    result = pd.Series(values, index=s.index, dtype=object, name=s.name)
+    if s.dtype != object and replaced_with_none:
+        return result  # 數值欄位換成 None 時，舊版保留 object（None 不會變回 NaN）
+    return result.infer_objects()
+
+
+def to_int_or_none(s):
+    """NaN / None -> None，其餘轉 int（取代 replace({np.nan: 0}).astype('int64').replace({0: None}) 等寫法）"""
+    return s.astype(float).fillna(0).astype('int64').replace({0: None})
+
+
+def safe_literal(value):
+    """取代 eval：只解析 JSON / Python literal，不執行任意程式碼"""
+    if isinstance(value, (dict, list)):
+        return value
+    try:
+        return json.loads(value)
+    except (TypeError, ValueError):
+        return ast.literal_eval(value)
+
+
 conn = pymysql.connect(**db_settings)
 
 
@@ -53,9 +110,9 @@ query = "SELECT id, display, `order` from ranks"
 with conn.cursor() as cursor:
     cursor.execute(query)
     ranks = cursor.fetchall()
-    rank_map = dict(zip([r[0] for r in ranks], [eval(r[1])['en-us'] for r in ranks]))
-    rank_map_c = dict(zip([r[0] for r in ranks], [eval(r[1])['zh-tw'] for r in ranks]))
-    rank_map_c_reverse = dict(zip([eval(r[1])['zh-tw'] for r in ranks],[r[0] for r in ranks]))
+    rank_map = dict(zip([r[0] for r in ranks], [safe_literal(r[1])['en-us'] for r in ranks]))
+    rank_map_c = dict(zip([r[0] for r in ranks], [safe_literal(r[1])['zh-tw'] for r in ranks]))
+    rank_map_c_reverse = dict(zip([safe_literal(r[1])['zh-tw'] for r in ranks],[r[0] for r in ranks]))
     rank_order_map = dict(zip([r[0] for r in ranks], [r[2] for r in ranks]))
 
 conn.close()
@@ -161,11 +218,12 @@ def process_text_variants(text: str) -> str:
 #       new_string = new_string.replace(char,f"{var_df_2.loc[i, 'pattern']}")
 #   return new_string
 
-spe_chars = ['+','-', '&','&&', '||', '!','(', ')', '{', '}', '[', ']', '^', '"', '~', '*', '?', ':', '/', '.']
+# 補上 \ | < > # @（Lucene 查詢 / 正規式的特殊字元），避免跳脫不完整
+spe_chars = ['\\', '+','-', '&', '|', '!','(', ')', '{', '}', '[', ']', '^', '"', '~', '*', '?', ':', '/', '.', '<', '>', '#', '@']
 
 def escape_solr_query(string):
     final_string = ''
-    for s in string:
+    for s in str(string):
         if s in spe_chars:
             final_string += f'\\{s}'
         else:
@@ -190,7 +248,11 @@ def get_conditioned_solr_search(req):
     # /.* .*/
 
     if taxon_id := req.get('taxon_id'):
-        query_list.append('taxon_id:{}'.format(taxon_id))
+        if is_valid_taxon_id(taxon_id):
+            query_list.append('taxon_id:"{}"'.format(taxon_id))
+        else:
+            # 格式不符視同查無資料
+            query_list.append('-*:*')
 
     # NOTE 如果有 scientific_name 或 common_name 的話 要先查詢一次 取得taxon_id
 
@@ -200,6 +262,7 @@ def get_conditioned_solr_search(req):
 
     if keyword := req.get('scientific_name','').strip():
         keyword_wo_rank = remove_rank_char(keyword)
+        keyword_wo_rank = escape_solr_query(keyword_wo_rank)  # 原本未跳脫，可注入 Solr 語法
         keyword_wo_rank = process_text_variants(keyword_wo_rank)
 
         keyword = escape_solr_query(keyword)
@@ -209,6 +272,7 @@ def get_conditioned_solr_search(req):
 
     if common_name_keyword := req.get('common_name','').strip():
 
+        common_name_keyword = escape_solr_query(common_name_keyword)  # 原本未跳脫
         common_name_keyword = process_text_variants(common_name_keyword)
         name_query_list.append('search_name:/{}/'.format(common_name_keyword))
         name_query_list.append('-taxon_name_id:*')
@@ -292,7 +356,7 @@ def get_conditioned_solr_search(req):
     # alien_type
 
     if alien_type := req.get('alien_type'):
-        query_list.append('alien_type:"{}"'.format(alien_type))
+        query_list.append('alien_type:"{}"'.format(escape_solr_query(alien_type)))
 
 
     # 日期
@@ -317,7 +381,7 @@ def get_conditioned_solr_search(req):
                 if css == 'null':
                     cs_list.append(f'-{con}:*')
                 else:
-                    cs_list.append(f'{con}:"{css}"')
+                    cs_list.append(f'{con}:"{escape_solr_query(css)}"')
             if cs_list:
                 c_str = f"({' OR '.join(cs_list)})"
                 query_list.append(c_str)
@@ -331,7 +395,7 @@ def get_conditioned_solr_search(req):
             if css == 'null':
                 cs_list.append(f'-cites:*')
             else:
-                cs_list.append(f'cites:/.*{css}.*/')
+                cs_list.append(f'cites:/.*{escape_solr_query(css)}.*/')
         if cs_list:
             c_str = f"({' OR '.join(cs_list)})"
             query_list.append(c_str)
@@ -341,17 +405,23 @@ def get_conditioned_solr_search(req):
     if taxon_group := req.get('taxon_group'):
         conn = pymysql.connect(**db_settings)
 
-        query_1 = f"""SELECT t.taxon_id FROM taxon_names tn 
+        query_1 = f"""SELECT DISTINCT t.taxon_id FROM taxon_names tn 
                     JOIN api_taxon t ON tn.id = t.accepted_taxon_name_id 
                     LEFT JOIN api_common_name acn ON acn.taxon_id = t.taxon_id  
                     WHERE (tn.name = %s OR acn.name_c REGEXP %s) AND t.is_deleted = 0 """
         with conn.cursor() as cursor:
-            cursor.execute(query_1, (taxon_group, process_text_variants(taxon_group)))
+            # REGEXP 的 pattern 先跳脫正規式特殊字元，避免使用者輸入任意正規式（ReDoS / 語法錯誤）
+            # 前後加 ^ $：中文名需完全相同（僅容許異體字，如 台/臺），不做部分比對
+            name_c_pattern = '^(' + process_text_variants(re.escape(taxon_group)) + ')$'
+            cursor.execute(query_1, (taxon_group, name_c_pattern))
             t_id = cursor.fetchall()
             if len(t_id):
                 # 可能不只一筆
-                t_str = [ 'path:/.*{}.*/'.format(t[0]) for t in t_id]
+                t_str = [ 'path:/.*{}.*/'.format(escape_solr_query(t[0])) for t in t_id]
                 query_list.append(f"({' OR '.join(t_str)})")
+            else:
+                # 查無指定分類群：回傳 0 筆（原本會因為沒有加條件而回傳全部物種）
+                query_list.append('-*:*')
         
         conn.close()
 
@@ -403,405 +473,3 @@ def get_whitelist():
         # 建立 DataFrame
         whitelist_list_3 = pd.DataFrame(whitelist_list_3_data) if whitelist_list_3_data else pd.DataFrame(columns=['accepted_taxon_name_id', 'taxon_name_id', 'reference_id'])
         return whitelist_list_1, whitelist_list_2, whitelist_list_3
-
-
-# def check_taxon_usage():
-#     """每日更新檢查usage - 優化版本"""
-    
-#     # NOTE 以下都不考慮reference_id=95 因為只是單純的俗名backbone
-    
-#     # 取得當前的白名單
-#     whitelist_list_1, whitelist_list_2, whitelist_list_3 = get_whitelist()
-    
-#     conn = pymysql.connect(**db_settings)
-#     now = timezone.now() + timedelta(hours=8)
-    
-#     try:
-#         # 獲取主要數據
-#         usage_df = _get_reference_usage_data(conn)
-        
-#         # 執行各項檢查
-#         _check_deleted_fixed_usages(conn, now)  # Error type 1
-#         _check_autonym_accepted_not_accepted(conn, usage_df, whitelist_list_1, now)  # Error type 2
-#         _check_autonym_multiple_not_accepted(conn, usage_df, whitelist_list_1, now)  # Error type 3
-#         _check_multiple_accepted_same_object_group(conn, usage_df, whitelist_list_1, now)  # Error type 4
-#         _check_unique_status_constraint(conn, usage_df, whitelist_list_3, now)  # Error type 5
-#         _check_multiple_synonyms(conn, usage_df, whitelist_list_2, now)  # Error type 6
-#         _check_multiple_accepted_names(conn, usage_df, now)  # Error type 7
-#         _check_no_accepted_names(conn, usage_df, now)  # Error type 8
-#         _check_taxon_name_in_multiple_groups(conn, usage_df, whitelist_list_2, now)  # Error type 9
-#         _check_duplicate_reference_usage_ids(conn, usage_df, whitelist_list_3, now)  # Error type 10
-#         _record_check_timestamp(conn, now)  # Error type 11
-        
-#     finally:
-#         conn.close()
-    
-#     return 'done!'
-
-
-# def _get_reference_usage_data(conn):
-#     """獲取主要的reference usage數據"""
-#     query = """
-#         SELECT ru.id, ru.status, ru.accepted_taxon_name_id, ru.taxon_name_id, ru.reference_id, 
-#                tn.object_group, tn.autonym_group, r.properties ->> '$.check_list_type'
-#         FROM reference_usages ru 
-#         JOIN taxon_names tn ON tn.id = ru.taxon_name_id
-#         JOIN `references` r ON r.id = ru.reference_id
-#         WHERE ru.is_title != 1 
-#           AND ru.status NOT IN ("", "undetermined") 
-#           AND ru.deleted_at IS NULL 
-#           AND ru.accepted_taxon_name_id IS NOT NULL 
-#           AND ru.reference_id != 95
-#     """
-    
-#     with conn.cursor() as cursor:
-#         cursor.execute(query)
-#         data = cursor.fetchall()
-        
-#     df = pd.DataFrame(data, columns=[
-#         'ru_id', 'ru_status', 'accepted_taxon_name_id', 'taxon_name_id', 
-#         'reference_id', 'object_group', 'autonym_group', 'check_list_type'
-#     ])
-    
-#     # 過濾和清理數據
-#     df = df[df.check_list_type != 4]  # !=4 寫在query裡會排除掉null
-#     df = df.drop_duplicates().reset_index(drop=True)
-#     df = df.replace({np.nan: None})
-#     df = df.drop(columns=['check_list_type'])
-    
-#     return df
-
-
-# def _get_reference_data(conn):
-#     """獲取 reference 資料用於 Type 12 檢查"""
-#     query = """
-#         SELECT r.id, r.publish_year, r.type, ac.publish_date, 
-#                r.properties ->> '$.book_title' as book_title,
-#                r.properties ->> '$.volume' as volume,
-#                r.properties ->> '$.issue' as issue
-#         FROM `references` r 
-#         LEFT JOIN api_citations ac ON ac.reference_id = r.id
-#         WHERE r.is_publish = 1
-#     """
-    
-#     with conn.cursor() as cursor:
-#         cursor.execute(query)
-#         data = cursor.fetchall()
-    
-#     df = pd.DataFrame(data, columns=['id', 'publish_year', 'type', 'publish_date', 'book_title', 'volume', 'issue'])
-#     df['publish_date'] = pd.to_datetime(df['publish_date'], errors='coerce')
-#     df = df.set_index('id')
-#     return df
-
-# def _insert_or_update_usage_check(conn, data, now):
-#     """統一的插入或更新函數"""
-#     query = """
-#         INSERT INTO api_usage_check (reference_usage_id, autonym_group, object_group, 
-#                                    accepted_taxon_name_id, taxon_name_id, reference_id, 
-#                                    error_type, whitelist_type, updated_at) 
-#         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-#         ON DUPLICATE KEY UPDATE updated_at = %s
-#     """
-    
-#     with conn.cursor() as cursor:
-#         cursor.execute(query, (*data, now, now))
-#         conn.commit()
-
-
-# def _check_deleted_fixed_usages(conn, now):
-#     """檢查被刪除的fixed usage_id"""
-#     query = """
-#         SELECT fixed_reference_usage_id 
-#         FROM api_taxon 
-#         WHERE is_deleted = 0 
-#           AND fixed_reference_usage_id IN (
-#               SELECT id FROM reference_usages WHERE deleted_at IS NOT NULL
-#           )
-#     """
-    
-#     with conn.cursor() as cursor:
-#         cursor.execute(query)
-#         deleted_fixed_usages = cursor.fetchall()
-        
-#         for usage_id, in deleted_fixed_usages:
-#             _insert_or_update_usage_check(
-#                 conn, (usage_id, None, None, None, None, None, 1, None), now
-#             )
-
-
-# def _check_autonym_accepted_not_accepted(conn, df, whitelist_list_1, now):
-#     """檢查autonym/同模：同一篇文獻在不同分類群同時出現accepted和not-accepted"""
-#     filtered_df = df[
-#         (~df.ru_id.isin(whitelist_list_1)) & 
-#         (df.ru_status != 'misapplied')
-#     ]
-    
-#     check_data = (filtered_df[['object_group', 'reference_id', 'ru_status', 'accepted_taxon_name_id']]
-#                   .drop_duplicates()
-#                   .groupby(['reference_id', 'object_group'], as_index=False)
-#                   .nunique())
-    
-#     problematic_refs = check_data[
-#         (check_data.ru_status > 1) & 
-#         (check_data.accepted_taxon_name_id > 1)
-#     ][['object_group', 'reference_id']]
-    
-#     # 找出需要檢查的object_group
-#     oo_to_check = []
-#     for _, row in problematic_refs.iterrows():
-#         object_group, reference_id = row['object_group'], row['reference_id']
-        
-#         not_accepted_rows = df[
-#             (~df.ru_id.isin(whitelist_list_1)) &
-#             (df.ru_status == 'not-accepted') &
-#             (df.object_group == object_group) &
-#             (df.reference_id == reference_id)
-#         ]
-        
-#         acp_ids = not_accepted_rows.accepted_taxon_name_id.tolist()
-#         for acp_id in acp_ids:
-#             if not len(df[
-#                 (df.taxon_name_id == acp_id) & 
-#                 (df.object_group == object_group)
-#             ]):
-#                 oo_to_check.append(object_group)
-#                 break
-    
-#     # 處理問題記錄
-#     if oo_to_check:
-#         rows_to_check = (problematic_refs[problematic_refs.object_group.isin(oo_to_check)]
-#                         .merge(df))
-#         rows_to_check = rows_to_check[~rows_to_check.ru_id.isin(whitelist_list_1)]
-#         rows_to_check = rows_to_check.replace({None: 0})
-
-#         for _, row in rows_to_check.iterrows():
-#             _insert_or_update_usage_check(
-#                 conn, (row['ru_id'], row.get('autonym_group'), row['object_group'], 
-#                       0, 0, 0, 2, 1), now
-#             )
-
-
-# def _check_autonym_multiple_not_accepted(conn, df, whitelist_list_1, now):
-#     """檢查autonym/同模：同一篇文獻中有多個not-accepted在不同分類群"""
-#     filtered_df = df[
-#         (~df.ru_id.isin(whitelist_list_1)) & 
-#         (df.ru_status == 'not-accepted')
-#     ]
-    
-#     check_data = (filtered_df[['object_group', 'reference_id', 'accepted_taxon_name_id']]
-#                   .drop_duplicates()
-#                   .groupby(['reference_id', 'object_group'], as_index=False)
-#                   .nunique())
-    
-#     problematic_refs = check_data[check_data.accepted_taxon_name_id > 1]
-    
-#     oo_to_check = []
-#     for _, row in problematic_refs.iterrows():
-#         object_group, reference_id = row['object_group'], row['reference_id']
-        
-#         acp_ids = filtered_df[
-#             (filtered_df.object_group == object_group) &
-#             (filtered_df.reference_id == reference_id)
-#         ].accepted_taxon_name_id.tolist()
-        
-#         for acp_id in acp_ids:
-#             if not len(df[
-#                 (df.taxon_name_id == acp_id) & 
-#                 (df.object_group == object_group)
-#             ]):
-#                 oo_to_check.append(object_group)
-#                 break
-    
-#     if oo_to_check:
-#         rows_to_check = (problematic_refs[problematic_refs.object_group.isin(oo_to_check)]
-#                         .merge(df))
-#         rows_to_check = rows_to_check[~rows_to_check.ru_id.isin(whitelist_list_1)]
-#         rows_to_check = rows_to_check.replace({None: 0})
-
-#         for _, row in rows_to_check.iterrows():
-#             _insert_or_update_usage_check(
-#                 conn, (row['ru_id'], row.get('autonym_group'), row['object_group'], 
-#                       0, 0, 0, 3, 1), now
-#             )
-
-
-# def _check_multiple_accepted_same_object_group(conn, df, whitelist_list_1, now):
-#     """檢查同模（不包含autonym）：同一篇文獻中多個accepted"""
-#     filtered_df = df[
-#         (~df.ru_id.isin(whitelist_list_1)) &
-#         (df.autonym_group.isnull()) &
-#         (df.object_group.notnull()) &
-#         (df.ru_status == 'accepted')
-#     ]
-    
-#     check_data = (filtered_df[['object_group', 'taxon_name_id', 'reference_id']]
-#                   .drop_duplicates()
-#                   .groupby(['reference_id', 'object_group'], as_index=False)
-#                   .nunique())
-    
-#     problematic_refs = check_data[check_data.taxon_name_id > 1]
-    
-#     rows_to_check = pd.DataFrame()
-#     for _, row in problematic_refs.iterrows():
-#         matching_rows = df[
-#             (~df.ru_id.isin(whitelist_list_1)) &
-#             (df.ru_status == 'accepted') &
-#             (df.object_group == row['object_group']) &
-#             (df.reference_id == row['reference_id'])
-#         ]
-#         rows_to_check = pd.concat([rows_to_check, matching_rows], ignore_index=True)
-    
-#     rows_to_check = rows_to_check.replace({None: 0})
-
-#     for _, row in rows_to_check.iterrows():
-#         _insert_or_update_usage_check(
-#             conn, (row['ru_id'], row.get('autonym_group'), row['object_group'], 
-#                   0, 0, 0, 4, 1), now
-#         )
-
-
-# def _check_unique_status_constraint(conn, df, whitelist_list_3, now):
-#     """檢查accepted_taxon_name_id, taxon_name_id, reference_id是否只對到一個status"""
-#     check_data = df[['accepted_taxon_name_id', 'taxon_name_id', 'reference_id', 'ru_status']]
-#     grouped = check_data.groupby(['accepted_taxon_name_id', 'taxon_name_id', 'reference_id'], 
-#                                  as_index=False).count()
-#     problematic = grouped[grouped.ru_status > 1]
-    
-#     # 轉換數據類型以匹配白名單
-#     for col in problematic.columns:
-#         if col in whitelist_list_3.columns:
-#             problematic[col] = problematic[col].astype(whitelist_list_3[col].dtype)
-    
-#     # 排除白名單
-#     df_diff = problematic.merge(
-#         whitelist_list_3, 
-#         on=['accepted_taxon_name_id', 'taxon_name_id', 'reference_id'], 
-#         how='left', 
-#         indicator=True
-#     )
-#     df_result = df_diff[df_diff['_merge'] == 'left_only'].drop(columns=['_merge'])
-#     df_result = df_result.replace({None: 0})
-
-#     for _, row in df_result.iterrows():
-#         _insert_or_update_usage_check(
-#             conn, (0, 0, 0, row['accepted_taxon_name_id'], 
-#                   row['taxon_name_id'], row['reference_id'], 5, 3), now
-#         )
-
-
-# def _check_multiple_synonyms(conn, df, whitelist_list_2, now):
-#     """檢查學名在同一篇文獻中被設定成兩個分類群的同物異名"""
-#     not_accepted_data = df[df.ru_status == 'not-accepted'][
-#         ['accepted_taxon_name_id', 'taxon_name_id', 'reference_id']
-#     ].drop_duplicates()
-    
-#     grouped = not_accepted_data.groupby(['taxon_name_id', 'reference_id'], as_index=False).count()
-#     problematic = grouped[
-#         (grouped.accepted_taxon_name_id > 1) & 
-#         (~grouped.taxon_name_id.isin(whitelist_list_2))
-#     ]
-#     problematic = problematic.replace({None: 0})
-    
-#     for _, row in problematic.iterrows():
-#         _insert_or_update_usage_check(
-#             conn, (0, 0, 0, 0, row['taxon_name_id'], 
-#                   row['reference_id'], 6, 2), now
-#         )
-
-
-# def _check_multiple_accepted_names(conn, df, now):
-#     """檢查同一個分類群有一個以上的接受名"""
-#     all_pairs = df[['accepted_taxon_name_id', 'reference_id']].drop_duplicates()
-#     accepted_pairs = df[df.ru_status == 'accepted'][
-#         ['accepted_taxon_name_id', 'reference_id', 'ru_status']
-#     ].drop_duplicates()
-    
-#     grouped = accepted_pairs.groupby(['accepted_taxon_name_id', 'reference_id'], 
-#                                    as_index=False).count()
-#     merged = all_pairs.merge(grouped, how='left')
-    
-#     multiple_accepted = merged[merged.ru_status > 1]
-#     multiple_accepted = multiple_accepted.replace({None: 0})
-
-#     for _, row in multiple_accepted.iterrows():
-#         _insert_or_update_usage_check(
-#             conn, (0, 0, 0, row['accepted_taxon_name_id'], 
-#                   0, row['reference_id'], 7, 0), now
-#         )
-
-
-# def _check_no_accepted_names(conn, df, now):
-#     """檢查同一個分類群裡面沒有任何接受名"""
-#     all_pairs = df[['accepted_taxon_name_id', 'reference_id']].drop_duplicates()
-#     accepted_pairs = df[df.ru_status == 'accepted'][
-#         ['accepted_taxon_name_id', 'reference_id', 'ru_status']
-#     ].drop_duplicates()
-    
-#     grouped = accepted_pairs.groupby(['accepted_taxon_name_id', 'reference_id'], 
-#                                    as_index=False).count()
-#     merged = all_pairs.merge(grouped, how='left')
-    
-#     no_accepted = merged[merged.ru_status.isna()]
-#     no_accepted = no_accepted.replace({None: 0})
-    
-#     for _, row in no_accepted.iterrows():
-#         _insert_or_update_usage_check(
-#             conn, (0, 0, 0, row['accepted_taxon_name_id'], 
-#                   0, row['reference_id'], 8, 0), now
-#         )
-
-
-# def _check_taxon_name_in_multiple_groups(conn, df, whitelist_list_2, now):
-#     """檢查同一個學名出現在同一篇文獻中的兩個分類群且不是誤用"""
-#     filtered_df = df[df.ru_status != 'misapplied'][
-#         ['accepted_taxon_name_id', 'reference_id', 'taxon_name_id']
-#     ].drop_duplicates()
-    
-#     grouped = filtered_df.groupby(['reference_id', 'taxon_name_id'], as_index=False).count()
-#     problematic = grouped[
-#         (grouped.accepted_taxon_name_id > 1) & 
-#         (~grouped.taxon_name_id.isin(whitelist_list_2))
-#     ]
-#     problematic = problematic.replace({None: 0})
-    
-#     for _, row in problematic.iterrows():
-#         _insert_or_update_usage_check(
-#             conn, (0, 0, 0, 0, row['taxon_name_id'], 
-#                   row['reference_id'], 9, 2), now
-#         )
-
-
-# def _check_duplicate_reference_usage_ids(conn, df, whitelist_list_3, now):
-#     """檢查一組reference_id, accepted_taxon_name_id, taxon_name_id對到多個ru_id"""
-#     unique_data = df[['ru_id', 'reference_id', 'accepted_taxon_name_id', 'taxon_name_id']].drop_duplicates()
-#     grouped = unique_data.groupby(['reference_id', 'accepted_taxon_name_id', 'taxon_name_id'], 
-#                                  as_index=False).count()
-#     problematic = grouped[grouped.ru_id > 1]
-    
-#     # 排除白名單
-#     df_diff = problematic.merge(
-#         whitelist_list_3, 
-#         on=['accepted_taxon_name_id', 'taxon_name_id', 'reference_id'], 
-#         how='left', 
-#         indicator=True
-#     )
-#     df_result = df_diff[df_diff['_merge'] == 'left_only'].drop(columns=['_merge'])
-#     df_result = df_result.replace({None: 0})
-
-#     for _, row in df_result.iterrows():
-#         _insert_or_update_usage_check(
-#             conn, (0, 0, 0, row['accepted_taxon_name_id'], 
-#                   row['taxon_name_id'], row['reference_id'], 10, 0), now
-#         )
-
-
-# def _record_check_timestamp(conn, now):
-#     """記錄檢查的時間戳"""
-#     query = """
-#         INSERT INTO api_usage_check (error_type, updated_at) VALUES (11, %s)
-#         ON DUPLICATE KEY UPDATE updated_at = %s
-#     """
-    
-#     with conn.cursor() as cursor:
-#         cursor.execute(query, (now, now))
-#         conn.commit()

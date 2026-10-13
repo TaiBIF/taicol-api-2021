@@ -17,6 +17,7 @@ from drf_yasg import openapi
 from api.services._00_update_usage_check import check_taxon_usage
 from api.utils import *
 import requests
+import hmac
 from django.views.decorators.csrf import csrf_exempt
 from sqlalchemy import create_engine
 from api.services.utils.common import safe_json_dumps
@@ -154,7 +155,8 @@ class TaxonVersionView(APIView):
             return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
         try:
             data = []
-            if taxon_id := request.GET.get('taxon_id'):
+            taxon_id = request.GET.get('taxon_id')
+            if taxon_id and is_valid_taxon_id(taxon_id):  # 格式不符視同查無資料
                 conn = pymysql.connect(**db_settings)
                 # 抓過去的
                 # 如果是backbone不給type
@@ -237,6 +239,8 @@ class NamecodeView(APIView):
             # 如果有錯的話直接改成預設值
             limit = 20
             offset = 0
+        limit = min(max(limit, 1), 300)
+        offset = max(offset, 0)
         try:
             if name_id := request.GET.getlist('name_id'):
                 conn = pymysql.connect(**db_settings)
@@ -268,7 +272,7 @@ class NamecodeView(APIView):
                         # Taiwan+誤用 misapplied
                         custom_dict = {'accepted': 0, 'not-accepted': 1, 'misapplied': 2}
                         taxon_tmp = taxon_tmp.sort_values(by=['status'], key=lambda x: x.map(custom_dict)).sort_values(by='is_in_taiwan',ascending=False)
-                        taxon_tmp['is_in_taiwan'] = taxon_tmp['is_in_taiwan'].replace({0: False, 1: True, '0': False, '1': True, 2: False, '2': False, None: False, '': False})
+                        taxon_tmp['is_in_taiwan'] = map_values(taxon_tmp['is_in_taiwan'], {0: False, 1: True, '0': False, '1': True, 2: False, '2': False, None: False, '': False})
                         taxon_tmp = taxon_tmp.rename(columns={'status': 'taicol_name_status'})
                         taxon_tmp = taxon_tmp[['taxon_id','taicol_name_status','is_in_taiwan']]
                         df.loc[i,'taxon'] = taxon_tmp.to_json(orient='records')
@@ -307,7 +311,7 @@ class NamecodeView(APIView):
                         # Taiwan+誤用 misapplied
                         custom_dict = {'accepted': 0, 'not-accepted': 1, 'misapplied': 2}
                         taxon_tmp = taxon_tmp.sort_values(by=['status'], key=lambda x: x.map(custom_dict)).sort_values(by='is_in_taiwan',ascending=False)
-                        taxon_tmp['is_in_taiwan'] = taxon_tmp['is_in_taiwan'].replace({0: False, 1: True, '0': False, '1': True, '2': False, None: False, '': False})
+                        taxon_tmp['is_in_taiwan'] = map_values(taxon_tmp['is_in_taiwan'], {0: False, 1: True, '0': False, '1': True, '2': False, None: False, '': False})
                         taxon_tmp = taxon_tmp.rename(columns={'status': 'taicol_name_status'})
                         taxon_tmp = taxon_tmp[['taxon_id','taicol_name_status','is_in_taiwan']]
                         df.loc[i,'taxon'] = taxon_tmp.to_json(orient='records')
@@ -403,7 +407,7 @@ class NameMatchView(APIView):
                 # kingdom 比對生物界
 
                 if kingdoms := request.GET.getlist('kingdom'):
-                    query_dict['kingdom'] = ",".join([f'"{k}"' for k in kingdoms])
+                    query_dict['kingdom'] = ",".join([f'"{k.replace(chr(34), "")}"' for k in kingdoms])  # 移除雙引號避免跳脫
 
                 # bio_group 比對生物類群
 
@@ -419,10 +423,11 @@ class NameMatchView(APIView):
 
                 if resp.status_code == 200:
                     resp = resp.json()
-                    data = resp['data']
+                    # NomenMatch 原始結果另存，不放進回傳的 data（data 只放資料庫比對後的結果）
+                    match_data = resp['data']
                     tmp_df = pd.DataFrame()
                     
-                    for ddd in data:
+                    for ddd in match_data:
                         for dd in ddd:
                             for d in dd['results']:
                                 tmp_dict = {
@@ -464,7 +469,7 @@ class NameMatchView(APIView):
                             matched_name_accepted_usage = pd.DataFrame(cursor.fetchall(), columns=['accepted_name_id', 'usage_id', 'reference_id', 'reference_type', 'publish_year', 'citation', 'is_in_taiwan'])
                             if len(matched_name_accepted_usage):
                                 matched_name_accepted_usage = matched_name_accepted_usage.replace({np.nan: None, '': None, 'null': None})
-                                matched_name_accepted_usage['is_in_taiwan'] = matched_name_accepted_usage['is_in_taiwan'].replace({0: False, 1: True, '0': False, '1': True, 2: None, '2': None, '': None})                        
+                                matched_name_accepted_usage['is_in_taiwan'] = map_values(matched_name_accepted_usage['is_in_taiwan'], {0: False, 1: True, '0': False, '1': True, 2: None, '2': None, '': None})                        
                                 matched_name_accepted_usage['reference_order'] = matched_name_accepted_usage['reference_type'].apply(lambda x: custom_reference_type_order[x])
                                 # 先處理排序 先排year再排type
                                 matched_name_accepted_usage = matched_name_accepted_usage.sort_values('publish_year', ascending=False).sort_values('reference_order')
@@ -474,8 +479,8 @@ class NameMatchView(APIView):
                                 matched_name_accepted_usage.loc[matched_name_accepted_usage.reference_type.isin([4,6]), 'publish_year'] = None
                                 matched_name_accepted_usage.loc[matched_name_accepted_usage.reference_type.isin([4,6]), 'citation'] = 'TaiCOL Backbone'
                                 matched_name_accepted_usage['reference_type'] = matched_name_accepted_usage['reference_type'].apply(lambda x: reference_type_map[x] if x else None)
-                                matched_name_accepted_usage['publish_year'] = matched_name_accepted_usage['publish_year'].fillna(0).astype(int).replace({0: None})
-                                matched_name_accepted_usage['reference_id'] = matched_name_accepted_usage['reference_id'].fillna(0).astype(int).replace({0: None})
+                                matched_name_accepted_usage['publish_year'] = to_int_or_none(matched_name_accepted_usage['publish_year'])
+                                matched_name_accepted_usage['reference_id'] = to_int_or_none(matched_name_accepted_usage['reference_id'])
                                 for name_id in df.accepted_name_id.unique():
                                     df.loc[df.accepted_name_id==name_id,'matched_name_accepted_usage'] = json.dumps(matched_name_accepted_usage[matched_name_accepted_usage.accepted_name_id==name_id][['usage_id', 'reference_id', 'reference_type','publish_year', 'citation', 'is_in_taiwan']].to_dict('records'))
                         # 取得 matched_name_usage
@@ -493,7 +498,7 @@ class NameMatchView(APIView):
                                                                                            'usage_status', 'accepted_name_id','is_in_taiwan'])
                             if len(matched_name_usage):
                                 matched_name_usage = matched_name_usage.replace({np.nan: None, '': None, 'null': None})
-                                matched_name_usage['is_in_taiwan'] = matched_name_usage['is_in_taiwan'].replace({0: False, 1: True, '0': False, '1': True, 2: None, '2': None, '': None})
+                                matched_name_usage['is_in_taiwan'] = map_values(matched_name_usage['is_in_taiwan'], {0: False, 1: True, '0': False, '1': True, 2: None, '2': None, '': None})
                                 matched_name_usage['reference_order'] = matched_name_usage['reference_type'].apply(lambda x: custom_reference_type_order[x])
                                 # 先處理排序 先排year再排type
                                 matched_name_usage = matched_name_usage.sort_values('publish_year', ascending=False).sort_values('reference_order')
@@ -503,8 +508,8 @@ class NameMatchView(APIView):
                                 matched_name_usage.loc[matched_name_usage.reference_type.isin([4,6]), 'publish_year'] = None
                                 matched_name_usage.loc[matched_name_usage.reference_type.isin([4,6]), 'citation'] = 'TaiCOL Backbone'
                                 matched_name_usage['reference_type'] = matched_name_usage['reference_type'].apply(lambda x: reference_type_map[x] if x else None)
-                                matched_name_usage['publish_year'] = matched_name_usage['publish_year'].fillna(0).astype(int).replace({0: None})
-                                matched_name_usage['reference_id'] = matched_name_usage['reference_id'].fillna(0).astype(int).replace({0: None})
+                                matched_name_usage['publish_year'] = to_int_or_none(matched_name_usage['publish_year'])
+                                matched_name_usage['reference_id'] = to_int_or_none(matched_name_usage['reference_id'])
                                 for name_id in df.matched_name_id.unique():
                                     df.loc[df.matched_name_id==name_id,'matched_name_usage'] = json.dumps(matched_name_usage[matched_name_usage.matched_name_id==name_id][['usage_id', 'reference_id', 'reference_type',
                                                                                                                                                                            'publish_year', 'citation', 'usage_status', 'accepted_name_id', 'is_in_taiwan']].to_dict('records'))
@@ -594,16 +599,16 @@ class ReferencesView(APIView):
                 df.loc[df.reference_type.isin([4,6]), 'publish_year'] = None
                 df.loc[df.reference_type.isin([4,6]), 'citation'] = 'TaiCOL Backbone'
                 df['reference_type'] = df['reference_type'].apply(lambda x: reference_type_map[x] if x else None)
-                df['publish_year'] = df['publish_year'].fillna(0).astype(int).replace({0: None})
-                df['reference_id'] = df['reference_id'].fillna(0).astype(int).replace({0: None})
+                df['publish_year'] = to_int_or_none(df['publish_year'])
+                df['reference_id'] = to_int_or_none(df['reference_id'])
                 df['is_deleted'] = df['is_deleted'].apply(lambda x: True if x else False)
-                df['is_endemic'] = df['is_endemic'].replace({0: False, 1: True, '0': False, '1': True})
-                df['is_in_taiwan'] = df['is_in_taiwan'].replace({0: False, 1: True, '0': False, '1': True, 2: None, '2': None, '': None})
-                df['indications'] = df['indications'].apply(lambda x:  ','.join(eval(x)) if x and x !='[]' else None)
+                df['is_endemic'] = map_values(df['is_endemic'], {0: False, 1: True, '0': False, '1': True})
+                df['is_in_taiwan'] = map_values(df['is_in_taiwan'], {0: False, 1: True, '0': False, '1': True, 2: None, '2': None, '': None})
+                df['indications'] = df['indications'].apply(lambda x:  ','.join(safe_literal(x)) if x and x !='[]' else None)
                 df = df.replace({np.nan: None, '': None})
-                df['reference_id'] = df['reference_id'].replace({np.nan: 0}).astype('int64').replace({0: None})
-                df['usage_id'] = df['usage_id'].replace({np.nan: 0}).astype('int64').replace({0: None})
-                df['accepted_name_id'] = df['accepted_name_id'].replace({np.nan: 0}).astype('int64').replace({0: None})
+                df['reference_id'] = to_int_or_none(df['reference_id'])
+                df['usage_id'] = to_int_or_none(df['usage_id'])
+                df['accepted_name_id'] = to_int_or_none(df['accepted_name_id'])
                 df = df.drop(columns=['reference_order'])
                 data = df.to_dict('records')
                 new_data = []
@@ -665,7 +670,7 @@ def build_higher_taxa(path_ids, docs):
     higher = higher.replace({np.nan: None, '': None})
     higher['rank'] = higher['rank_id'].apply(lambda x: rank_map[x])
     higher = higher.replace({np.nan: None, '': None})
-    higher['name_id'] = higher['name_id'].replace({np.nan: 0}).astype('int64').replace({0: None})
+    higher['name_id'] = to_int_or_none(higher['name_id'])
     return higher[['taxon_id','name_id','simple_name','name_author','formatted_name','rank','common_name_c']].to_dict(orient='records')
 
 
@@ -695,18 +700,27 @@ class HigherTaxaView(APIView):
             return HttpResponse(json.dumps(response, ensure_ascii=False), content_type="application/json,charset=utf-8")
         try:
             data = []  # 如果沒有輸入taxon_id, 不回傳資料
-            if taxon_id := request.GET.get('taxon_id'):
+            taxon_id = request.GET.get('taxon_id')
+            if taxon_id and is_valid_taxon_id(taxon_id):  # 格式不符視同查無資料
                 # 分成兩階段 先抓回path，再去抓name
 
-                taxon_resp = requests.get(f'{SOLR_PREFIX}taxa/select?fq=taxon_name_id:*&fq=status:accepted&q=taxon_id:{taxon_id}&fl=path,taxon_rank_id')
+                # 使用 params 交給 requests 編碼，並跳脫 Solr 特殊字元，避免注入其他 Solr 參數 / 查詢語法
+                taxon_resp = requests.get(f'{SOLR_PREFIX}taxa/select', params={
+                    'fq': ['taxon_name_id:*', 'status:accepted'],
+                    'q': f'taxon_id:"{taxon_id}"',
+                    'fl': 'path,taxon_rank_id'})
                 if taxon_resp.status_code == 200:
                     if taxon_resp.json()['response']['numFound']:
                         info = taxon_resp.json()['response']['docs'][0]
                         if path := info.get('path'):
                             path = path.split('>')
-                            path_str = ' OR '.join(path)
+                            path_str = ' OR '.join([f'"{p}"' for p in path if is_valid_taxon_id(p)])
                             # NOTE 這邊可能會需要query已經刪除的taxon
-                            path_resp = requests.get(f'{SOLR_PREFIX}taxa/select?fq=taxon_name_id:*&fq=status:accepted&q=taxon_id:({path_str})&fl={HIGHER_TAXA_FL}&rows=1000')
+                            path_resp = requests.get(f'{SOLR_PREFIX}taxa/select', params={
+                                'fq': ['taxon_name_id:*', 'status:accepted'],
+                                'q': f'taxon_id:({path_str})',
+                                'fl': HIGHER_TAXA_FL,
+                                'rows': 1000})
                             if path_resp.status_code == 200:
                                 data = build_higher_taxa(path, path_resp.json()['response']['docs'])
 
@@ -889,7 +903,8 @@ class TaxonView(APIView):
 
             solr_query_list = get_conditioned_solr_search(req=request.GET)
 
-            limit = 300 if limit > 300 else limit  # 最大值 300
+            limit = min(max(limit, 1), 300)  # 最大值 300
+            offset = max(offset, 0)
 
             query = { "query": "*:*",
                     "offset": offset,
@@ -958,15 +973,16 @@ class TaxonView(APIView):
                 # 0 / 1 要改成 true / false
                 # not_official
                 is_list = ['is_hybrid','is_in_taiwan','is_endemic','is_fossil','is_terrestrial','is_freshwater','is_brackish','is_marine','not_official']
-                df[is_list] = df[is_list].replace({0: False, 1: True, '0': False, '1': True, 'true': True, 'false': False})
+                for col in is_list:
+                    df[col] = map_values(df[col], {0: False, 1: True, '0': False, '1': True, 'true': True, 'false': False})
 
                 # cites要改成 I,II,III
                 df['cites'] = df['cites'].apply(lambda x: x.replace('1','I').replace('2','II').replace('3','III') if x else x)
 
                 df = df.replace({np.nan: None, '': None})
-                df['name_id'] = df['name_id'].replace({np.nan: 0}).astype('int64').replace({0: None})
+                df['name_id'] = to_int_or_none(df['name_id'])
 
-                df['is_in_taiwan'] = df['is_in_taiwan'].replace({2: False, '2': False, None: False})  # 移到這裡 確保 null → False
+                df['is_in_taiwan'] = map_values(df['is_in_taiwan'], {2: False, '2': False, None: False})  # 移到這裡 確保 null → False
 
                 # highertaxa：收集本頁所有 path 上的 taxon_id，一次查回 Solr 再分配
                 df['higher_taxa'] = [[] for _ in range(len(df))]
@@ -1018,7 +1034,8 @@ class NameView(APIView):
             limit, offset = 20, 0
 
         # 限制最大筆數
-        limit = 300 if limit > 300 else limit
+        limit = min(max(limit, 1), 300)
+        offset = max(offset, 0)
 
         # 參數驗證
         allowed_params = {'name_id', 'scientific_name', 'common_name', 'rank', 'updated_at', 'created_at', 'taxon_group', 'limit', 'offset'}
@@ -1038,6 +1055,7 @@ class NameView(APIView):
         join_sql = ""
         where_sql = " WHERE tn.is_publish = 1 "
         sql_params = []
+        cte_params = []
 
         conn = pymysql.connect(**db_settings)
 
@@ -1062,7 +1080,7 @@ class NameView(APIView):
                 # CTE: 加上 DISTINCT 確保遞迴中不重複，is_title != 1 排除純標題
                 cte_sql = f"""
                 WITH RECURSIVE hierarchy_scope (taxon_name_id) AS (
-                    SELECT {root_id} 
+                    SELECT %s 
                     UNION DISTINCT
                     SELECT ru.taxon_name_id 
                     FROM reference_usages ru
@@ -1072,6 +1090,7 @@ class NameView(APIView):
                 )
                 """
                 join_sql = " JOIN hierarchy_scope hs ON tn.id = hs.taxon_name_id "
+                cte_params = [root_id]
 
             # 其他篩選條件
             if name_id:
@@ -1107,7 +1126,7 @@ class NameView(APIView):
                 # [Step A] 計算總筆數 (Count)
                 # 使用 COUNT(DISTINCT tn.id) 確保總數正確
                 count_query = f"{cte_sql} SELECT COUNT(DISTINCT tn.id) FROM taxon_names tn {join_sql} {where_sql}"
-                cursor.execute(count_query, sql_params)
+                cursor.execute(count_query, cte_params + sql_params)
                 len_total = cursor.fetchone()[0]
 
                 if len_total == 0:
@@ -1123,9 +1142,9 @@ class NameView(APIView):
                     {join_sql} 
                     {where_sql} 
                     ORDER BY tn.id 
-                    LIMIT {limit} OFFSET {offset}
+                    LIMIT %s OFFSET %s
                 """
-                cursor.execute(page_ids_query, sql_params)
+                cursor.execute(page_ids_query, cte_params + sql_params + [limit, offset])
                 page_ids_rows = cursor.fetchall()
 
                 # 將 tuple result 轉為 list [1, 2, 3]
@@ -1134,8 +1153,7 @@ class NameView(APIView):
                 # [Step C] 取得詳細資料 (Get Details)
                 # 只有當有 ID 時才執行
                 if target_ids:
-                    # 將 ID 列表轉為字串給 IN 使用，因為數量最多 300，這樣做是安全的
-                    ids_str = ','.join(map(str, target_ids))
+                    # 改用參數化 IN (%s) 傳入 ID
 
                     # 修正：tn.name AS simple_name 以配合 Pandas Column
                     select_fields = """
@@ -1159,12 +1177,12 @@ class NameView(APIView):
                         JOIN nomenclatures n ON tn.nomenclature_id = n.id
                         LEFT JOIN api_namecode anc ON tn.id = anc.taxon_name_id
                         LEFT JOIN api_names an ON tn.id = an.taxon_name_id
-                        WHERE tn.id IN ({ids_str})
+                        WHERE tn.id IN %s
                         GROUP BY tn.id 
                         ORDER BY tn.id
                     """
 
-                    cursor.execute(main_query)
+                    cursor.execute(main_query, (target_ids,))
                     data_rows = cursor.fetchall()
                 else:
                     data_rows = []
@@ -1189,7 +1207,7 @@ class NameView(APIView):
                     
                     # 轉換 Boolean
                     df['is_deleted'] = df['is_deleted'].notna()
-                    df['is_hybrid'] = df['is_hybrid'].replace({'false': False, 'true': True})
+                    df['is_hybrid'] = map_values(df['is_hybrid'], {'false': False, 'true': True})
 
                     # 處理 Rank 顯示
                     df['rank'] = pd.to_numeric(df['rank'], errors='coerce')
@@ -1241,16 +1259,15 @@ class NameView(APIView):
                     hybrid_ids = df[df['is_hybrid'] == True]['name_id'].tolist()
                     hybrid_map = {}
                     if hybrid_ids:
-                        ids_str = ','.join(map(str, hybrid_ids))
-                        q_hybrid = f"""
+                        q_hybrid = """
                             SELECT tnhp.taxon_name_id, GROUP_CONCAT(CONCAT(tn.name, ' ', tn.formatted_authors) SEPARATOR ' × ')
                             FROM taxon_name_hybrid_parent tnhp
                             JOIN taxon_names tn ON tn.id = tnhp.parent_taxon_name_id
-                            WHERE tnhp.taxon_name_id IN ({ids_str}) AND tn.is_publish = 1
+                            WHERE tnhp.taxon_name_id IN %s AND tn.is_publish = 1
                             GROUP BY tnhp.taxon_name_id
                         """
                         with conn.cursor() as cursor:
-                            cursor.execute(q_hybrid)
+                            cursor.execute(q_hybrid, ([int(i) for i in hybrid_ids],))
                             for rid, name_str in cursor.fetchall():
                                 hybrid_map[rid] = name_str
                     df['hybrid_parent'] = df['name_id'].map(hybrid_map)
@@ -1281,7 +1298,7 @@ class NameView(APIView):
                                     g = g.copy()
                                     g['sort_val'] = g['status'].map(custom_dict).fillna(9)
                                     g = g.sort_values(['sort_val', 'is_in_taiwan'], ascending=[True, False])
-                                    g['is_in_taiwan'] = g['is_in_taiwan'].replace({0: False, 1: True, '0': False, '1': True, '2': False, None: False})
+                                    g['is_in_taiwan'] = map_values(g['is_in_taiwan'], {0: False, 1: True, '0': False, '1': True, '2': False, None: False})
                                     result = g[['taxon_id', 'status', 'is_in_taiwan']].rename(columns={'status': 'taicol_name_status'}).to_dict('records')
                                     return result
                                 taxon_map = t_df.groupby('taxon_name_id').apply(process_solr_group).to_dict()
@@ -1320,15 +1337,20 @@ class NameView(APIView):
     
 
 def get_client_ip(request):
-    """取得客戶端真實 IP 的輔助函式"""
+    """取得客戶端真實 IP 的輔助函式
+
+    X-Forwarded-For 最左邊的值可由使用者自行偽造，不可信任。
+    改為從右邊數回「受信任的 proxy 層數」取值（正式站：Traefik -> nginx -> web，預設 2 層）。
+    """
+    remote_addr = request.META.get("REMOTE_ADDR")
     x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
-    if x_forwarded_for:
-        # HTTP_X_FORWARDED_FOR 可能包含多個 IP (Client, Proxy1, Proxy2)，第一位為真實 Client IP
-        ip = x_forwarded_for.split(",")[0].strip()
-    else:
-        # 無代理伺服器時（如本機測試），取 REMOTE_ADDR
-        ip = request.META.get("REMOTE_ADDR")
-    return ip
+    trusted_proxy_count = env.int("TRUSTED_PROXY_COUNT", default=2)
+    if x_forwarded_for and trusted_proxy_count > 0:
+        ips = [ip.strip() for ip in x_forwarded_for.split(",") if ip.strip()]
+        if len(ips) >= trusted_proxy_count:
+            return ips[-trusted_proxy_count]
+    # 無代理伺服器時（如本機測試），取 REMOTE_ADDR
+    return remote_addr
 
 
 def update_check_usage(request):
@@ -1370,7 +1392,10 @@ def get_taxon_by_higher(request):
     
     # 因為已經有限定是最高上階層是科 所以底下的不用再限定
     higher_taxa = request.GET.get('higher_taxa','')
-    higher_taxa = higher_taxa.split(',')
+    # 只接受 t + 7 位數字，其餘忽略；全部不合法就直接回空陣列
+    higher_taxa = [h.strip() for h in higher_taxa.split(',') if is_valid_taxon_id(h.strip())]
+    if not higher_taxa:
+        return HttpResponse(json.dumps([]), content_type='application/json')
 
 
     query_list = []
@@ -1415,7 +1440,23 @@ def get_taxon_by_higher(request):
 
     # 回傳path包含higher_taxa的所有taxon_id 
 
+def require_bearer_token(env_key):
+    """內部 API 驗證：需帶 Authorization: Bearer <token>，token 與 .env 的 env_key 比對"""
+    def decorator(view_func):
+        def wrapper(request, *args, **kwargs):
+            token = get_bearer_token(request)
+            expected = env(env_key, default='')
+            if not token or not expected or not hmac.compare_digest(token.encode(), expected.encode()):
+                return JsonResponse({'status': 'token error'}, status=401)
+            return view_func(request, *args, **kwargs)
+        wrapper.__name__ = view_func.__name__
+        wrapper.__doc__ = view_func.__doc__
+        return wrapper
+    return decorator
+
+
 @csrf_exempt
+@require_bearer_token('INTERNAL_API_TOKEN')
 def generate_checklist(request):
 
     data = json.loads(request.body)
@@ -1456,7 +1497,9 @@ def get_bearer_token(request):
 
 def is_valid_token(token):
     """驗證 token 是否有效"""
-    return token == env('SOLR_UPDATE_TOKEN')
+    expected = env('SOLR_UPDATE_TOKEN', default='')
+    # 使用固定時間比較，避免 timing attack；未設定 token 時一律拒絕
+    return bool(expected) and hmac.compare_digest(token.encode(), expected.encode())
 
 
 
@@ -1491,6 +1534,9 @@ def update_solr(request):
     
     if not taxon_ids:
         return JsonResponse({'status': 'empty taxon_ids'}, status=400)
+
+    if not all(is_valid_taxon_id(tid) for tid in taxon_ids):
+        return JsonResponse({'status': 'invalid taxon_ids format'}, status=400)
     
     start_time = time.time()
     
@@ -1659,6 +1705,7 @@ def handle_batch_partial_update(taxon_ids: List[str]):
 
 
 
+@require_bearer_token('INTERNAL_API_TOKEN')
 def update_name(request):
     from api.services._02_update_name import TaxonomicNameUpdater
     
@@ -1685,6 +1732,7 @@ def update_name(request):
     return JsonResponse({'status': 'no_params', 'error': 'No valid parameters provided'})
 
 
+@require_bearer_token('INTERNAL_API_TOKEN')
 def update_reference(request):
     from api.services._01_update_ref import CitationUpdater
     
