@@ -16,7 +16,7 @@ db_settings = {
     "port": int(env('DB_PORT')),
     "user": env('DB_USER'),
     "password": env('DB_PASSWORD'),
-    "db": env('DB_DBNAME'),
+    "database": env('DB_DBNAME'),
 }
 
 

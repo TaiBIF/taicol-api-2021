@@ -29,7 +29,7 @@ db_settings = {
     "port": int(env('DB_PORT')),
     "user": env('DB_USER'),
     "password": env('DB_PASSWORD'),
-    "db": env('DB_DBNAME'),
+    "database": env('DB_DBNAME'),
 }
 
 match_url = env('NOMENMATCH_URL')
@@ -1301,7 +1301,7 @@ class NameView(APIView):
                                     g['is_in_taiwan'] = map_values(g['is_in_taiwan'], {0: False, 1: True, '0': False, '1': True, '2': False, None: False})
                                     result = g[['taxon_id', 'status', 'is_in_taiwan']].rename(columns={'status': 'taicol_name_status'}).to_dict('records')
                                     return result
-                                taxon_map = t_df.groupby('taxon_name_id').apply(process_solr_group).to_dict()
+                                taxon_map = t_df.groupby('taxon_name_id').apply(process_solr_group, include_groups=False).to_dict()
                                 # kingdom：同一學名可能對應多個 taxon，取 accepted 優先的第一個非空值
                                 k_df = t_df[t_df['kingdom'].notna() & (t_df['kingdom'] != '')].copy()
                                 k_df['sort_val'] = k_df['status'].map({'accepted': 0, 'not-accepted': 1, 'misapplied': 2}).fillna(9)
@@ -1473,7 +1473,7 @@ def generate_checklist(request):
     from api.services._04_generate_checklist import process_taxon_checklist
 
     final_usage_df, tmp_checklist_id = process_taxon_checklist(pairs, exclude_cultured, only_in_taiwan, references, classification_view, taxon_ids, completeness, usage_references)
-    db_string = 'mysql+pymysql://{}:{}@{}:{}/{}'.format(db_settings.get('user'), db_settings.get('password'), db_settings.get('host'), db_settings.get('port'), db_settings.get('db'))
+    db_string = 'mysql+pymysql://{}:{}@{}:{}/{}'.format(db_settings.get('user'), db_settings.get('password'), db_settings.get('host'), db_settings.get('port'), db_settings.get('database'))
     db = create_engine(db_string)
 
     final_usage_df.to_sql('tmp_namespace_usages',

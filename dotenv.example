@@ -8,3 +8,11 @@ DB_PORT=
 DB_USER=
 DB_PASSWORD=
 DB_DBNAME=
+# Django secret key（正式站請設定）
+SECRET_KEY=
+# update_solr 用的 Bearer token
+SOLR_UPDATE_TOKEN=
+# update/name、update/reference、generate_checklist 用的 Bearer token
+INTERNAL_API_TOKEN=
+# Django 前面會在 X-Forwarded-For 加上 IP 的 proxy 層數（正式站 Traefik + nginx = 2）
+TRUSTED_PROXY_COUNT=2

@@ -16,7 +16,7 @@ db_settings = {
     "port": int(env('DB_PORT')),
     "user": env('DB_USER'),
     "password": env('DB_PASSWORD'),
-    "db": env('DB_DBNAME'),
+    "database": env('DB_DBNAME'),
 }
 
 
@@ -82,9 +82,6 @@ def safe_literal(value):
         return json.loads(value)
     except (TypeError, ValueError):
         return ast.literal_eval(value)
-
-
-conn = pymysql.connect(**db_settings)
 
 
 status_map = {'accepted': 'Accepted', 'misapplied': 'Misapplied', 'not-accepted': 'Not accepted', 'deleted': 'Deleted', 'undetermined': 'Undetermined'}

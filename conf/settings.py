@@ -136,8 +136,6 @@ TIME_ZONE = 'UTC'
 
 USE_I18N = True
 
-USE_L10N = True
-
 USE_TZ = True
 
 
@@ -149,9 +147,14 @@ PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_ROOT = os.path.join(PROJECT_DIR, 'static')  # /conf/static
 
 
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+
 SWAGGER_SETTINGS = {
    'USE_SESSION_AUTH': False
 }
+# drf-yasg 1.21+：format 不再帶 "." 前綴（urls.py 的 swagger 路由已配合調整）
+SWAGGER_USE_COMPAT_RENDERERS = False
 
 
 SOLR_PREFIX = env('SOLR_PREFIX')

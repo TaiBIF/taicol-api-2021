@@ -422,7 +422,8 @@ def select_latest_ru(df, ref_df, accepted_only=True, mark_on_original_df=None, r
             max_date = grp_year['publish_date'].max()
             return grp_year[grp_year['publish_date'] == max_date]
         return grp_year
-    df_filtered = df_filtered.groupby('tmp_taxon_id', group_keys=False).apply(keep_latest_by_year_and_date)
+    # 以 array 分組：避免 pandas「apply 作用到分組欄位」的 DeprecationWarning，同時保留 tmp_taxon_id 欄位
+    df_filtered = df_filtered.groupby(df_filtered['tmp_taxon_id'].to_numpy(), group_keys=False).apply(keep_latest_by_year_and_date)
     # Step 4: 多章節處理
     # TODO 這邊應該可以改回用df了 因為前面有merge
     def resolve_chapters(grp):
@@ -431,7 +432,7 @@ def select_latest_ru(df, ref_df, accepted_only=True, mark_on_original_df=None, r
             if len(ref_subset) > 0 and ref_subset[['book_title', 'volume', 'issue']].nunique().max() == 1:
                 return grp.head(1)
         return grp
-    df_filtered = df_filtered.groupby('tmp_taxon_id', group_keys=False).apply(resolve_chapters)
+    df_filtered = df_filtered.groupby(df_filtered['tmp_taxon_id'].to_numpy(), group_keys=False).apply(resolve_chapters)
     # Step 5: parent 關係
     conflict_list = []
     def resolve_conflict(grp):
@@ -449,7 +450,7 @@ def select_latest_ru(df, ref_df, accepted_only=True, mark_on_original_df=None, r
         # else:
         #     conflict_list.append(grp.name if hasattr(grp, 'name') else grp['tmp_taxon_id'].iloc[0])
         #     return grp
-    latest_accepted = df_filtered.groupby('tmp_taxon_id', group_keys=False).apply(resolve_conflict)
+    latest_accepted = df_filtered.groupby(df_filtered['tmp_taxon_id'].to_numpy(), group_keys=False).apply(resolve_conflict)
     # Step 6: 標記 is_latest
     # 使用三元組合：tmp_taxon_id + reference_id + accepted_taxon_name_id
     key_set = set(

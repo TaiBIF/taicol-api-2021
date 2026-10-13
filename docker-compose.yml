@@ -12,4 +12,3 @@ services:
       - 8005:8005
     env_file:
       - .env
-    restart: always
