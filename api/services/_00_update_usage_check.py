@@ -237,7 +237,7 @@ def _check_deleted_fixed_usages(conn, now):
         cursor.execute(query)
         deleted_fixed_usages = cursor.fetchall()
     
-    batch = [(usage_id, None, None, None, None, None, 1, None) for usage_id, in deleted_fixed_usages]
+    batch = [(usage_id, 0, 0, 0, 0, 0, 1, None) for usage_id, in deleted_fixed_usages]
     _insert_or_update_usage_check_batch(conn, batch, now)
 
 
