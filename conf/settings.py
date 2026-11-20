@@ -158,3 +158,23 @@ SWAGGER_USE_COMPAT_RENDERERS = False
 
 
 SOLR_PREFIX = env('SOLR_PREFIX')
+
+
+# ===== Logging =====
+# DEBUG=False 時 Django 預設不會把錯誤輸出到 console，
+# 這裡讓錯誤（含 traceback）寫到 stderr，可用 docker logs 查看
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {'format': '[{asctime}] {levelname} {name}: {message}', 'style': '{'},
+    },
+    'handlers': {
+        'console': {'class': 'logging.StreamHandler', 'formatter': 'verbose'},
+    },
+    'loggers': {
+        # 未處理例外（500）的 traceback
+        'django.request': {'handlers': ['console'], 'level': 'ERROR', 'propagate': False},
+    },
+    'root': {'handlers': ['console'], 'level': 'WARNING'},
+}
